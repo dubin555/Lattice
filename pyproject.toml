@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lattice-agent"
+version = "2.0.0"
+description = "A Task-Level Distributed Agent Workflow Framework for building scalable, resource-efficient multi-agent systems"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Lattice Development Team", email = "your-email@example.com"}
+]
+maintainers = [
+    {name = "Lattice Development Team", email = "your-email@example.com"}
+]
+keywords = [
+    "agent",
+    "workflow",
+    "distributed",
+    "multi-agent",
+    "task-scheduling",
+    "ray",
+    "langgraph",
+    "ai-agent",
+    "resource-management"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+]
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]",
+    "networkx>=3.0.0",
+    "websocket-client>=1.6.0",
+    "cloudpickle>=3.0.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+ray = [
+    "ray>=2.10.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+]
+all = [
+    "ray>=2.10.0",
+    "PyPDF2>=3.0.0",
+    "openpyxl>=3.1.0",
+    "python-docx>=0.8.11",
+    "Pillow>=9.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/QinbinLi/Lattice"
+Documentation = "https://lattice-doc.readthedocs.io/en/latest/"
+Repository = "https://github.com/QinbinLi/Lattice"
+"Bug Tracker" = "https://github.com/QinbinLi/Lattice/issues"
+
+[project.scripts]
+lattice = "lattice.cli.cli:main"
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lattice*"]
+exclude = ["test*", "tests*", "examples*", "web*", "docs*", "build*"]
+
+[tool.setuptools.package-data]
+lattice = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

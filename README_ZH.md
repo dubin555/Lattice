@@ -1,0 +1,240 @@
+<h2 align="center"><img src="./assets/imgs/image.png" style="height:1em; width:auto; vertical-align:middle"/> Lattice: LLM Agent 分布式框架</h2>
+
+<p align="center">
+    <a href="https://latticeagent.net/">
+        <img src="https://img.shields.io/badge/官网-latticeagent.net-blue?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Website">
+    </a>
+    <a href="https://lattice-doc.readthedocs.io/en/latest/">
+        <img src="https://img.shields.io/badge/文档-ReadTheDocs-black?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation">
+    </a>
+    <a href="https://github.com/QinbinLi/Lattice/blob/main/LICENSE">
+        <img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="License">
+    </a>
+</p>
+
+<p align="center">
+    中文 | <a href="./README.md">English</a>
+</p>
+
+## 🌟 为什么选择 Lattice？
+
+- **任务级并行**
+
+  Lattice 支持细粒度的任务级管理，增强系统灵活性和可组合性，同时支持任务并行以显著提升 Agent 工作流的端到端性能。
+
+- **资源管理**
+
+  Lattice 支持工作流任务的资源分配，有效防止单个工作流内并行任务之间以及多个并发执行工作流之间的资源竞争。
+
+- **分布式部署**
+
+  Lattice 不仅支持单机部署，还支持分布式部署，让您可以构建高可用、可扩展的 Lattice 集群，满足大规模并发和高性能计算的需求。
+
+- **沙箱执行**
+
+  Lattice 提供多种隔离级别的安全任务执行环境（subprocess、seccomp、Docker），保护您的系统免受潜在恶意或有缺陷的任务代码影响。
+
+- **多 Agent 框架支持**
+
+  Lattice 可作为其他 Agent 框架的运行时后端。例如，LangGraph 可以无缝迁移到 Lattice，无需修改原有逻辑即可自动获得任务级并行能力。
+
+## 🏗️ 架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Lattice Client                           │
+│  (LatticeClient, LatticeWorkflow, @task 装饰器, LangGraph)       │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ HTTP/WebSocket
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Lattice Server (Head)                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │ FastAPI     │  │ Orchestrator│  │ Scheduler               │  │
+│  │ (REST API)  │  │ (生命周期)   │  │ (任务队列 + 调度)        │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              Resource Manager (CPU/GPU/内存)                 ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ Ray
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+   │   Worker 1  │     │   Worker 2  │     │   Worker N  │
+   │  (执行器)    │     │  (执行器)    │     │  (执行器)    │
+   │  [沙箱]     │     │  [沙箱]      │     │  [沙箱]     │
+   └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+## 🚀 快速开始
+
+### 1. 安装
+
+**从 PyPI 安装（推荐）**
+
+```bash
+pip install lattice-agent
+```
+
+**从源码安装**
+
+```bash
+git clone https://github.com/QinbinLi/Lattice.git
+cd Lattice
+pip install -e .
+```
+
+### 2. 启动 Lattice
+
+启动 Lattice Head 作为服务器：
+
+```bash
+lattice start --head --port 8000
+```
+
+分布式部署时，连接 Worker 节点：
+
+```bash
+lattice start --worker --addr HEAD_IP:HEAD_PORT
+```
+
+**启用沙箱（推荐用于不可信代码）：**
+
+```bash
+# 启用 seccomp 沙箱（仅 Linux，轻量级）
+lattice start --head --port 8000 --sandbox seccomp
+
+# 或使用 subprocess 沙箱（跨平台）
+lattice start --head --port 8000 --sandbox subprocess
+```
+
+### 3. 示例
+
+```python
+from typing import Any
+from lattice import LatticeClient, task
+
+# 1. 使用 @task 装饰器定义任务函数
+@task(inputs=["text"], outputs=["result"])
+def my_task(params):
+    text: Any = params.get("text")
+    return {"result": f"Hello {text}"}
+
+# 2. 创建 Lattice 客户端
+client = LatticeClient("http://localhost:8000")
+
+# 3. 创建工作流
+workflow = client.create_workflow()
+task1 = workflow.add_task(
+    my_task,
+    inputs={"text": "Lattice"}
+)
+
+# 4. 提交工作流并获取结果
+run_id = workflow.run()
+results = workflow.get_results(run_id)
+print(results)  # {'result': 'Hello Lattice'}
+```
+
+### 4. LangGraph 集成
+
+```python
+from lattice import LangGraphClient
+
+client = LangGraphClient("http://localhost:8000")
+
+@client.task(cpu=2, memory=4096)
+def process_data(state):
+    # 您的 LangGraph 节点逻辑
+    return {"processed": True}
+
+# 在 LangGraph 工作流中使用
+# 任务自动获得并行和资源管理能力
+```
+
+## 🛡️ 沙箱隔离
+
+Lattice 提供多种沙箱级别用于安全任务执行：
+
+| 级别 | 平台 | 隔离性 | 性能 |
+|------|------|--------|------|
+| `none` | 全平台 | 无隔离 | 最快 |
+| `subprocess` | 全平台 | 独立进程 + 资源限制 | 快 |
+| `seccomp` | Linux | 系统调用过滤 + 资源限制 | 快 |
+| `docker` | 全平台（需安装 Docker） | 完整容器隔离 | 较慢 |
+
+```python
+# 程序化配置沙箱
+from lattice.executor.sandbox import set_sandbox_config, SandboxConfig, SandboxLevel
+
+config = SandboxConfig(
+    level=SandboxLevel.SECCOMP,
+    timeout=300,
+    max_memory_mb=2048,
+)
+set_sandbox_config(config)
+```
+
+## 🖥️ Lattice Playground
+
+通过拖拽界面构建工作流：
+
+```bash
+lattice start --head --port 8000 --playground
+```
+
+### 内置任务工作流
+![设计工作流截图](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.png)  
+[设计工作流视频](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.mp4)
+
+### 自定义任务工作流
+![查看结果截图](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.png)  
+[查看结果视频](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.mp4)
+
+## 📊 Lattice Board
+
+使用内置仪表板监控您的 Lattice 集群：
+
+- 实时 Worker 状态和资源使用情况
+- 工作流执行追踪
+- 任务级指标和日志
+
+## 🧪 测试
+
+```bash
+# 运行单元测试
+pytest tests/unit/ -v
+
+# 运行集成测试（需要运行中的服务器）
+lattice start --head --port 8000 &
+pytest tests/integration/ -v -m integration
+```
+
+## 📁 项目结构
+
+```
+lattice/
+├── api/            # FastAPI 服务器和路由
+├── cli/            # 命令行接口
+├── client/         # 客户端 SDK (LatticeClient, LangGraphClient)
+├── core/           # 核心运行时 (orchestrator, scheduler, resource)
+├── executor/       # 任务执行 (Ray, sandbox)
+├── llm/            # LLM 实例管理
+└── utils/          # 工具函数
+web/
+├── lattice_playground/  # 工作流设计器 (React + Node.js)
+└── lattice_board/       # 监控仪表板 (React)
+```
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
+
+## 🤝 贡献
+
+欢迎贡献！请随时提交 Pull Request。
+
+## 📚 文档
+
+详细文档请访问 [Lattice 文档](https://lattice-doc.readthedocs.io/en/latest/)。
