@@ -172,14 +172,6 @@ config = SandboxConfig(
 set_sandbox_config(config)
 ```
 
-## 📊 Lattice Board
-
-Monitor your Lattice cluster with the built-in dashboard:
-
-- Real-time worker status and resource usage
-- Workflow execution tracking
-- Task-level metrics and logs
-
 ## 🧪 Testing
 
 ```bash
@@ -202,9 +194,6 @@ lattice/
 ├── executor/       # Task execution (Ray, sandbox)
 ├── llm/            # LLM instance management
 └── utils/          # Utilities
-web/
-├── lattice_playground/  # Workflow designer (React + Node.js)
-└── lattice_board/       # Monitoring dashboard (React)
 ```
 
 ## 📄 License

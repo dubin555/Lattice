@@ -172,14 +172,6 @@ config = SandboxConfig(
 set_sandbox_config(config)
 ```
 
-## 📊 Lattice Board
-
-使用内置仪表板监控您的 Lattice 集群：
-
-- 实时 Worker 状态和资源使用情况
-- 工作流执行追踪
-- 任务级指标和日志
-
 ## 🧪 测试
 
 ```bash
@@ -202,9 +194,6 @@ lattice/
 ├── executor/       # 任务执行 (Ray, sandbox)
 ├── llm/            # LLM 实例管理
 └── utils/          # 工具函数
-web/
-├── lattice_playground/  # 工作流设计器 (React + Node.js)
-└── lattice_board/       # 监控仪表板 (React)
 ```
 
 ## 📄 许可证
