@@ -1,13 +1,7 @@
 <h2 align="center"><img src="./assets/imgs/image.png" style="height:1em; width:auto; vertical-align:middle"/> Lattice: LLM Agent 分布式框架</h2>
 
 <p align="center">
-    <a href="https://latticeagent.net/">
-        <img src="https://img.shields.io/badge/官网-latticeagent.net-blue?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Website">
-    </a>
-    <a href="https://lattice-doc.readthedocs.io/en/latest/">
-        <img src="https://img.shields.io/badge/文档-ReadTheDocs-black?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation">
-    </a>
-    <a href="https://github.com/QinbinLi/Lattice/blob/main/LICENSE">
+    <a href="https://github.com/dubin555/Lattice/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="License">
     </a>
 </p>
@@ -15,6 +9,8 @@
 <p align="center">
     中文 | <a href="./README.md">English</a>
 </p>
+
+> **注意**: 本项目基于 [Maze](https://github.com/QinbinLi/Maze) 构建，并进行了改进，包括增强的沙箱隔离、更好的资源管理以及扩展的 LangGraph 集成。
 
 ## 🌟 为什么选择 Lattice？
 
@@ -80,7 +76,7 @@ pip install lattice-agent
 **从源码安装**
 
 ```bash
-git clone https://github.com/QinbinLi/Lattice.git
+git clone https://github.com/dubin555/Lattice.git
 cd Lattice
 pip install -e .
 ```
@@ -176,22 +172,6 @@ config = SandboxConfig(
 set_sandbox_config(config)
 ```
 
-## 🖥️ Lattice Playground
-
-通过拖拽界面构建工作流：
-
-```bash
-lattice start --head --port 8000 --playground
-```
-
-### 内置任务工作流
-![设计工作流截图](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.png)  
-[设计工作流视频](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.mp4)
-
-### 自定义任务工作流
-![查看结果截图](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.png)  
-[查看结果视频](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.mp4)
-
 ## 📊 Lattice Board
 
 使用内置仪表板监控您的 Lattice 集群：
@@ -235,6 +215,3 @@ web/
 
 欢迎贡献！请随时提交 Pull Request。
 
-## 📚 文档
-
-详细文档请访问 [Lattice 文档](https://lattice-doc.readthedocs.io/en/latest/)。

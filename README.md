@@ -1,13 +1,7 @@
 <h2 align="center"><img src="./assets/imgs/image.png" style="height:1em; width:auto; vertical-align:middle"/> Lattice: A Distributed Framework for LLM Agents</h2>
 
 <p align="center">
-    <a href="https://latticeagent.net/">
-        <img src="https://img.shields.io/badge/Website-latticeagent.net-blue?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Website">
-    </a>
-    <a href="https://lattice-doc.readthedocs.io/en/latest/">
-        <img src="https://img.shields.io/badge/Docs-ReadTheDocs-black?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation">
-    </a>
-    <a href="https://github.com/QinbinLi/Lattice/blob/main/LICENSE">
+    <a href="https://github.com/dubin555/Lattice/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
     </a>
 </p>
@@ -15,6 +9,8 @@
 <p align="center">
     <a href="./README_ZH.md">中文</a> | English
 </p>
+
+> **Note**: This project is built upon [Maze](https://github.com/QinbinLi/Maze) with improvements including enhanced sandbox isolation, better resource management, and extended LangGraph integration.
 
 ## 🌟 Why Lattice?
 
@@ -80,7 +76,7 @@ pip install lattice-agent
 **From source**
 
 ```bash
-git clone https://github.com/QinbinLi/Lattice.git
+git clone https://github.com/dubin555/Lattice.git
 cd Lattice
 pip install -e .
 ```
@@ -176,22 +172,6 @@ config = SandboxConfig(
 set_sandbox_config(config)
 ```
 
-## 🖥️ Lattice Playground
-
-Build workflows through a drag-and-drop interface:
-
-```bash
-lattice start --head --port 8000 --playground
-```
-
-### Builtin Task Workflow
-![Design Workflow Screenshot](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.png)  
-[Design Workflow Video](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/builtin_task.mp4)
-
-### User Defined Task Workflow
-![Check Result Screenshot](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.png)  
-[Check Result Video](https://meeting-agent1.oss-cn-beijing.aliyuncs.com/userdef_task.mp4)
-
 ## 📊 Lattice Board
 
 Monitor your Lattice cluster with the built-in dashboard:
@@ -235,6 +215,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📚 Documentation
-
-For detailed documentation, visit [Lattice Documentation](https://lattice-doc.readthedocs.io/en/latest/).
