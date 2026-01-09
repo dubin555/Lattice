@@ -1,6 +1,6 @@
 # Lattice Examples
 
-This directory contains examples demonstrating Lattice's parallel execution capabilities.
+Practical examples demonstrating Lattice's parallel execution capabilities for real-world applications.
 
 ## Quick Start
 
@@ -11,101 +11,90 @@ This directory contains examples demonstrating Lattice's parallel execution capa
 
 2. **Run any example:**
    ```bash
-   cd examples/01_mock_llm_agent
+   cd examples/01_document_embedding_pipeline
+   pip install -r requirements.txt
    python main.py
    ```
 
 ## Examples Overview
 
-| Example | Description | Dependencies | Speedup |
-|---------|-------------|--------------|---------|
-| [01_mock_llm_agent](./01_mock_llm_agent) | LLM agent with parallel tool calls | None | ~1.9x |
-| [02_parallel_data_processing](./02_parallel_data_processing) | Fan-out/fan-in data processing | None | ~2.8x |
-| [03_web_scraping_pipeline](./03_web_scraping_pipeline) | Multi-stage web scraping | None | ~3.25x |
-| [04_image_batch_processing](./04_image_batch_processing) | Batch image processing | Pillow (optional) | ~3.1x |
+| Example | Description | Use Case |
+|---------|-------------|----------|
+| [01_document_embedding_pipeline](./01_document_embedding_pipeline) | Parallel embedding generation | RAG applications |
+| [02_pdf_processing_pipeline](./02_pdf_processing_pipeline) | Document analysis pipeline | Enterprise document processing |
+| [03_data_analysis_pipeline](./03_data_analysis_pipeline) | Parallel data science tasks | Data engineering & ML |
 
 ## Example Details
 
-### 01 - Mock LLM Agent
-**Zero dependencies** - Perfect for understanding Lattice basics.
+### 01 - Document Embedding Pipeline
+**Dependencies:** `sentence-transformers`
 
-Simulates a typical LLM agent workflow where multiple tools (search, database, calculator) are called in parallel after query analysis.
-
-```
-Query → Analyze → [Search | Database | Calculator] → Synthesize
-         2s            3s     3s        3s              2s
-```
-
-### 02 - Parallel Data Processing
-**Zero dependencies** - Shows the fan-out/fan-in pattern.
-
-Demonstrates splitting data into chunks, processing each in parallel, and aggregating results.
+Generate document embeddings in parallel for RAG (Retrieval-Augmented Generation) applications.
 
 ```
-Split → [Process × 4] → Aggregate
-  1s        3s each         1s
+Documents -> Chunk -> [Parallel Embedding] -> Vector Index
 ```
 
-### 03 - Web Scraping Pipeline
-**Zero dependencies** - Multi-stage parallel pipeline.
+### 02 - PDF Processing Pipeline  
+**Dependencies:** `nltk`
 
-Shows how to parallelize both fetching and parsing stages of a web scraping workflow.
-
-```
-[Fetch × 4] → [Parse × 4] → Aggregate
-   2s each       1s each        1s
-```
-
-### 04 - Image Batch Processing
-**Optional: Pillow** - Resource-aware batch processing.
-
-Demonstrates image processing with CPU resource specifications. Works with mock images if Pillow isn't installed.
+Process multiple documents with parallel extraction and analysis (keywords, statistics, summarization).
 
 ```
-[Resize × 4] → [Filter × 4] → Gallery
-   1s each       1.5s each       1s
+PDFs -> [Parallel Extract] -> [Parallel Analysis] -> Report
 ```
 
-## Key Concepts Demonstrated
+### 03 - Data Analysis Pipeline
+**Dependencies:** `pandas`, `numpy`, `scikit-learn`
 
-### 1. Task Declaration
+Run independent data analysis tasks concurrently: cleaning, statistics, anomaly detection, feature engineering.
+
+```
+Load Data -> [Clean | Stats | Anomaly | Features] -> Report
+```
+
+## Key Concepts
+
+### Task Declaration
 ```python
 from lattice import task
 
 @task(
-    inputs=["query"],           # Input parameter names
-    outputs=["result"],         # Output parameter names
-    resources={"cpu": 2}        # Resource requirements
+    inputs=["documents"],
+    outputs=["embeddings"],
+    resources={"cpu": 2, "cpu_mem": 2048}
 )
-def my_task(params):
-    query = params.get("query")
-    return {"result": f"Processed: {query}"}
+def generate_embeddings(params):
+    docs = params.get("documents")
+    # ... processing
+    return {"embeddings": vectors}
 ```
 
-### 2. Workflow Construction
+### Workflow Construction
 ```python
 from lattice import LatticeClient
 
 client = LatticeClient("http://localhost:8000")
 workflow = client.create_workflow()
 
-# Add tasks and connect them
-task_a = workflow.add_task(analyze, inputs={"query": "hello"})
-task_b = workflow.add_task(process, inputs={"data": task_a.outputs["result"]})
+# Tasks with dependencies are parallelized automatically
+task_a = workflow.add_task(load_data, inputs={"path": "data.csv"})
+task_b = workflow.add_task(analyze, inputs={"data": task_a.outputs["data"]})
+task_c = workflow.add_task(detect, inputs={"data": task_a.outputs["data"]})
+# task_b and task_c run in parallel
 ```
 
-### 3. Execution
+### Execution
 ```python
 run_id = workflow.run()
 results = workflow.get_results(run_id)
 ```
 
-## Performance Tips
+## Scaling Up
 
-1. **Maximize parallelism** - Design DAGs with independent branches
-2. **Right-size resources** - Specify accurate CPU/GPU requirements
-3. **Batch similar work** - Group similar tasks for better scheduling
-4. **Use distributed mode** - Add worker nodes for more parallelism:
-   ```bash
-   lattice start --worker --addr HEAD_IP:HEAD_PORT
-   ```
+Add more workers for increased parallelism:
+
+```bash
+# On additional machines
+lattice start --worker --addr HEAD_IP:HEAD_PORT
+```
