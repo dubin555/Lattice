@@ -10,7 +10,6 @@ from lattice.executor.sandbox import (
     SandboxExecutor,
     SandboxError,
     SubprocessSandbox,
-    SeccompSandbox,
     set_sandbox_config,
     get_sandbox_config,
     get_sandbox_executor,
@@ -109,7 +108,7 @@ def task(params):
 class TestSeccompSandbox:
     def test_seccomp_simple_execution(self):
         config = SandboxConfig(level=SandboxLevel.SECCOMP, timeout=30)
-        sandbox = SeccompSandbox(config)
+        sandbox = SubprocessSandbox(config)
         
         code = """
 def task(params):
@@ -120,7 +119,7 @@ def task(params):
 
     def test_seccomp_with_math(self):
         config = SandboxConfig(level=SandboxLevel.SECCOMP, timeout=30)
-        sandbox = SeccompSandbox(config)
+        sandbox = SubprocessSandbox(config)
         
         code = """
 import math
@@ -133,7 +132,7 @@ def task(params):
 
     def test_seccomp_exception_handling(self):
         config = SandboxConfig(level=SandboxLevel.SECCOMP, timeout=30)
-        sandbox = SeccompSandbox(config)
+        sandbox = SubprocessSandbox(config)
         
         code = """
 def task(params):

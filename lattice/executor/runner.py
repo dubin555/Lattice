@@ -1,11 +1,10 @@
 """
 Task execution runner for distributed task execution.
 """
-import ast
 import base64
 import logging
 import os
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional
 
 import cloudpickle
 import ray
@@ -20,6 +19,25 @@ from lattice.executor.sandbox import (
 logger = logging.getLogger(__name__)
 
 
+def execute_code_string(code_str: str, task_input_data: Dict[str, Any]) -> Any:
+    import ast
+    tree = ast.parse(code_str)
+    func_node = None
+    import_nodes = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            func_node = node
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            import_nodes.append(node)
+    if func_node is None:
+        raise ValueError("No function definition found in code")
+    namespace: Dict[str, Any] = {}
+    for imp in import_nodes:
+        exec(compile(ast.Module(body=[imp], type_ignores=[]), '<string>', 'exec'), namespace)
+    exec(compile(ast.Module(body=[func_node], type_ignores=[]), '<string>', 'exec'), namespace)
+    return namespace[func_node.name](task_input_data)
+
+
 @ray.remote(max_retries=0)
 def execute_code_task(
     code_str: Optional[str] = None,
@@ -31,23 +49,17 @@ def execute_code_task(
     if cuda_visible_devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-    if sandbox_level is None:
-        config = get_sandbox_config()
-    else:
-        config = SandboxConfig(level=SandboxLevel(sandbox_level))
-    
+    config = SandboxConfig(level=SandboxLevel(sandbox_level)) if sandbox_level else get_sandbox_config()
+
     if config.level != SandboxLevel.NONE:
-        executor = SandboxExecutor(config)
-        return executor.execute(code_str, serialized_code, task_input_data)
-    
+        return SandboxExecutor(config).execute(code_str, serialized_code, task_input_data)
+
+    task_input_data = task_input_data or {}
     if serialized_code is not None:
-        func = cloudpickle.loads(base64.b64decode(serialized_code))
-        return func(task_input_data)
+        return cloudpickle.loads(base64.b64decode(serialized_code))(task_input_data)
     elif code_str is not None:
-        runner = CodeRunner(code_str, task_input_data)
-        return runner.run()
-    else:
-        raise ValueError("Either code_str or serialized_code must be provided")
+        return execute_code_string(code_str, task_input_data)
+    raise ValueError("Either code_str or serialized_code must be provided")
 
 
 @ray.remote(max_retries=0)
@@ -59,11 +71,9 @@ def execute_langgraph_task(
 ) -> Any:
     if cuda_visible_devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
-
     func = cloudpickle.loads(base64.b64decode(serialized_code))
     args = cloudpickle.loads(base64.b64decode(serialized_args))
     kwargs = cloudpickle.loads(base64.b64decode(serialized_kwargs))
-
     return func(*args, **kwargs)
 
 
@@ -72,43 +82,24 @@ class CodeRunner:
         self.code_str = code_str
         self.task_input_data = task_input_data or {}
 
-    def _extract_imports(self) -> list:
-        tree = ast.parse(self.code_str)
-        imports = []
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                imports.append(node)
-        return imports
-
-    def _extract_function(self) -> Optional[ast.FunctionDef]:
-        tree = ast.parse(self.code_str)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                return node
-        return None
-
     def run(self) -> Dict[str, Any]:
-        func_node = self._extract_function()
-        if func_node is None:
-            raise ValueError("No function definition found in code")
+        return execute_code_string(self.code_str, self.task_input_data)
 
-        import_nodes = self._extract_imports()
-        namespace: Dict[str, Any] = {}
 
-        for imp in import_nodes:
-            module = ast.Module(body=[imp], type_ignores=[])
-            code = compile(module, '<string>', 'exec')
-            exec(code, namespace)
-
-        module = ast.Module(body=[func_node], type_ignores=[])
-        code = compile(module, '<string>', 'exec')
-        exec(code, namespace)
-
-        func_name = func_node.name
-        if func_name not in namespace:
-            raise NameError(f"Function {func_name} not found in namespace")
-
-        return namespace[func_name](self.task_input_data)
+def _build_ray_options(resources: Dict[str, Any], node_id: Optional[str]) -> Dict[str, Any]:
+    num_cpus = resources.get("cpu", 1)
+    num_gpus = resources.get("gpu", 0)
+    memory = resources.get("cpu_mem", 0)
+    options = {"num_cpus": num_cpus}
+    if memory > 0:
+        options["memory"] = memory
+    if num_gpus > 0:
+        options["num_gpus"] = num_gpus
+    if node_id:
+        options["scheduling_strategy"] = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
+            node_id=node_id, soft=False
+        )
+    return options
 
 
 class TaskExecutor:
@@ -122,28 +113,9 @@ class TaskExecutor:
         gpu_id: Optional[int] = None,
         sandbox_level: Optional[str] = None,
     ) -> ray.ObjectRef:
-        resources = resources or {}
-        num_cpus = resources.get("cpu", 1)
-        num_gpus = resources.get("gpu", 0)
-        memory = resources.get("cpu_mem", 0)
-
-        options = {
-            "num_cpus": num_cpus,
-            "memory": memory if memory > 0 else None,
-        }
-
-        if num_gpus > 0:
-            options["num_gpus"] = num_gpus
-
-        if node_id:
-            options["scheduling_strategy"] = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
-                node_id=node_id,
-                soft=False,
-            )
-
+        options = _build_ray_options(resources or {}, node_id)
         cuda_devices = str(gpu_id) if gpu_id is not None else None
-
-        return execute_code_task.options(**{k: v for k, v in options.items() if v is not None}).remote(
+        return execute_code_task.options(**options).remote(
             code_str=code_str,
             serialized_code=serialized_code,
             task_input_data=task_input_data,
@@ -160,28 +132,9 @@ class TaskExecutor:
         node_id: Optional[str] = None,
         gpu_id: Optional[int] = None,
     ) -> ray.ObjectRef:
-        resources = resources or {}
-        num_cpus = resources.get("cpu", 1)
-        num_gpus = resources.get("gpu", 0)
-        memory = resources.get("cpu_mem", 0)
-
-        options = {
-            "num_cpus": num_cpus,
-            "memory": memory if memory > 0 else None,
-        }
-
-        if num_gpus > 0:
-            options["num_gpus"] = num_gpus
-
-        if node_id:
-            options["scheduling_strategy"] = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
-                node_id=node_id,
-                soft=False,
-            )
-
+        options = _build_ray_options(resources or {}, node_id)
         cuda_devices = str(gpu_id) if gpu_id is not None else None
-
-        return execute_langgraph_task.options(**{k: v for k, v in options.items() if v is not None}).remote(
+        return execute_langgraph_task.options(**options).remote(
             serialized_code=serialized_code,
             serialized_args=serialized_args,
             serialized_kwargs=serialized_kwargs,
