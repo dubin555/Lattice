@@ -1,4 +1,8 @@
-<h2 align="center"><img src="./assets/imgs/image.png" style="height:1em; width:auto; vertical-align:middle"/> Lattice: A Distributed Framework for LLM Agents</h2>
+<h1 align="center">Lattice</h1>
+
+<p align="center">
+  <b>Task-level Distributed Framework for LLM Agents</b>
+</p>
 
 <p align="center">
     <a href="https://github.com/dubin555/Lattice/blob/main/LICENSE">
@@ -10,130 +14,119 @@
     <a href="./README_ZH.md">中文</a> | English
 </p>
 
-> **Note**: This project is built upon [Maze](https://github.com/QinbinLi/Maze) with improvements including enhanced sandbox isolation, better resource management, and extended LangGraph integration.
+## The Problem
 
-## 🌟 Why Lattice?
+**LLM Agent workflows suffer from unnecessary sequential execution.**
 
-- **Task-level Parallelism**
-
-  Lattice enables fine-grained, task-level management, enhancing system flexibility and composability while supporting task parallelism to significantly improve the end-to-end performance of agent workflows.
-
-- **Resource Management**
-
-  Lattice supports resource allocation for workflow tasks, effectively preventing resource contention both among parallel tasks within a single workflow and across multiple concurrently executing workflows.
-
-- **Distributed Deployment**
-
-  Lattice supports not only standalone but also distributed deployment, allowing you to build highly available and scalable Lattice clusters to meet the demands of large-scale concurrency and high-performance computing.
-
-- **Sandbox Execution**
-
-  Lattice provides secure task execution with multiple isolation levels (subprocess, seccomp, Docker), protecting your system from potentially malicious or buggy task code.
-
-- **Multi-Agent Support**
-
-  Lattice can serve as a runtime backend for other agent frameworks. For example, it allows LangGraph to be seamlessly migrated to Lattice and automatically gain task-level parallelism without modifying original logic.
-
-## 🏗️ Architecture
+Consider a typical agent workflow:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Lattice Client                           │
-│  (LatticeClient, LatticeWorkflow, @task decorator, LangGraph)   │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ HTTP/WebSocket
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Lattice Server (Head)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │ FastAPI     │  │ Orchestrator│  │ Scheduler               │  │
-│  │ (REST API)  │  │ (Lifecycle) │  │ (Task Queue + Dispatch) │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │              Resource Manager (CPU/GPU/Memory)              ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ Ray
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-   │   Worker 1  │     │   Worker 2  │     │   Worker N  │
-   │  (Executor) │     │  (Executor) │     │  (Executor) │
-   │  [Sandbox]  │     │  [Sandbox]  │     │  [Sandbox]  │
-   └─────────────┘     └─────────────┘     └─────────────┘
+User Query → Analyze Intent → [Search API] → [Database Query] → [Calculator] → Generate Response
+                                   3s              3s               3s
 ```
 
-## 🚀 Quick Start
+These three tool calls are **independent** — yet most frameworks execute them **sequentially** (9 seconds total).
 
-### 1. Install
+With Lattice, they run **in parallel** (3 seconds total):
 
-**From PyPI (Recommended)**
+```
+                              ┌─ Search API ──┐
+User Query → Analyze Intent ──┼─ Database ────┼─→ Generate Response
+                              └─ Calculator ──┘
+                                   3s (parallel)
+```
+
+## The Solution
+
+Lattice provides **automatic task-level parallelism** for LLM agent workflows:
+
+1. **Declare tasks** with `@task` decorator (inputs, outputs, resources)
+2. **Build DAG** by connecting task outputs to inputs
+3. **Execute** — Lattice automatically parallelizes independent tasks
+
+```python
+from lattice import LatticeClient, task
+
+@task(inputs=["query"], outputs=["results"])
+def search(params):
+    return {"results": call_search_api(params["query"])}
+
+@task(inputs=["query"], outputs=["data"])
+def database(params):
+    return {"data": query_database(params["query"])}
+
+# These tasks run in parallel automatically
+client = LatticeClient("http://localhost:8000")
+workflow = client.create_workflow()
+
+analyze = workflow.add_task(analyze_intent, inputs={"query": user_query})
+search_task = workflow.add_task(search, inputs={"query": analyze.outputs["query"]})
+db_task = workflow.add_task(database, inputs={"query": analyze.outputs["query"]})  # Parallel!
+final = workflow.add_task(synthesize, inputs={
+    "search": search_task.outputs["results"],
+    "data": db_task.outputs["data"]
+})
+```
+
+## Why Not Just Use...?
+
+| Solution | Gap |
+|----------|-----|
+| **Ray** | Low-level; no DAG abstraction for agents |
+| **Celery** | Task queue without DAG dependency management |
+| **Airflow/Prefect** | Batch ETL focus; not for real-time agent interactions |
+| **LangGraph** | Defines DAG but executes sequentially; **Lattice can be its parallel backend** |
+| **asyncio** | Manual concurrency; no distributed execution or resource management |
+
+**Lattice fills the gap**: declarative DAG + automatic parallelism + distributed execution + resource-aware scheduling.
+
+## Quick Start
+
+### Install
 
 ```bash
 pip install lattice-agent
+# or from source
+git clone https://github.com/dubin555/Lattice.git && cd Lattice && pip install -e .
 ```
 
-**From source**
-
-```bash
-git clone https://github.com/dubin555/Lattice.git
-cd Lattice
-pip install -e .
-```
-
-### 2. Launch Lattice
-
-Launch Lattice Head as the server:
+### Launch Server
 
 ```bash
 lattice start --head --port 8000
 ```
 
-For distributed deployment, connect worker nodes:
-
-```bash
-lattice start --worker --addr HEAD_IP:HEAD_PORT
-```
-
-**With Sandbox (Recommended for untrusted code):**
-
-```bash
-# Enable seccomp sandbox (Linux, lightweight)
-lattice start --head --port 8000 --sandbox seccomp
-
-# Or subprocess sandbox (cross-platform)
-lattice start --head --port 8000 --sandbox subprocess
-```
-
-### 3. Example
+### Run a Workflow
 
 ```python
-from typing import Any
 from lattice import LatticeClient, task
 
-# 1. Define your task functions using the @task decorator
-@task(inputs=["text"], outputs=["result"])
-def my_task(params):
-    text: Any = params.get("text")
-    return {"result": f"Hello {text}"}
+@task(inputs=["x"], outputs=["y"])
+def double(params):
+    return {"y": params["x"] * 2}
 
-# 2. Create the lattice client
 client = LatticeClient("http://localhost:8000")
-
-# 3. Create the workflow
 workflow = client.create_workflow()
-task1 = workflow.add_task(
-    my_task,
-    inputs={"text": "Lattice"}
-)
+t = workflow.add_task(double, inputs={"x": 21})
 
-# 4. Submit the workflow and get results
 run_id = workflow.run()
 results = workflow.get_results(run_id)
-print(results)  # {'result': 'Hello Lattice'}
+print(results)  # y = 42
 ```
 
-### 4. LangGraph Integration
+## Examples
+
+Real-world examples in [`examples/`](./examples):
+
+| Example | Description |
+|---------|-------------|
+| [Document Embedding Pipeline](./examples/01_document_embedding_pipeline) | Parallel embedding generation for RAG |
+| [PDF Processing Pipeline](./examples/02_pdf_processing_pipeline) | Multi-document analysis with parallel extraction |
+| [Data Analysis Pipeline](./examples/03_data_analysis_pipeline) | Concurrent data science tasks |
+
+## LangGraph Integration
+
+Run LangGraph workflows on Lattice for automatic parallelism:
 
 ```python
 from lattice import LangGraphClient
@@ -141,66 +134,53 @@ from lattice import LangGraphClient
 client = LangGraphClient("http://localhost:8000")
 
 @client.task(cpu=2, memory=4096)
-def process_data(state):
+def process_node(state):
     # Your LangGraph node logic
     return {"processed": True}
-
-# Use in your LangGraph workflow
-# Tasks automatically gain parallelism and resource management
 ```
 
-## 🛡️ Sandbox Isolation
+## Architecture
 
-Lattice provides multiple sandbox levels for secure task execution:
-
-| Level | Platform | Isolation | Performance |
-|-------|----------|-----------|-------------|
-| `none` | All | No isolation | Fastest |
-| `subprocess` | All | Separate process + resource limits | Fast |
-| `seccomp` | Linux | Syscall filtering + resource limits | Fast |
-| `docker` | All (requires Docker) | Full container isolation | Slower |
-
-```python
-# Configure sandbox programmatically
-from lattice.executor.sandbox import set_sandbox_config, SandboxConfig, SandboxLevel
-
-config = SandboxConfig(
-    level=SandboxLevel.SECCOMP,
-    timeout=300,
-    max_memory_mb=2048,
-)
-set_sandbox_config(config)
+```
+Client (@task, workflow.add_task)
+         │ HTTP
+         ▼
+   ┌─────────────────────────────┐
+   │       Lattice Server        │
+   │  Orchestrator → Scheduler   │
+   │     Resource Manager        │
+   └─────────────┬───────────────┘
+                 │ Ray
+    ┌────────────┼────────────┐
+    ▼            ▼            ▼
+ Worker 1    Worker 2    Worker N
 ```
 
-## 🧪 Testing
+## Distributed Mode
+
+Scale out by adding workers:
 
 ```bash
-# Run unit tests
-pytest tests/unit/ -v
+# Head node
+lattice start --head --port 8000
 
-# Run integration tests (requires running server)
-lattice start --head --port 8000 &
-pytest tests/integration/ -v -m integration
+# Worker nodes (on other machines)
+lattice start --worker --addr HEAD_IP:8000
 ```
 
-## 📁 Project Structure
+## Sandbox Execution
 
-```
-lattice/
-├── api/            # FastAPI server and routes
-├── cli/            # Command-line interface
-├── client/         # Client SDK (LatticeClient, LangGraphClient)
-├── core/           # Core runtime (orchestrator, scheduler, resource)
-├── executor/       # Task execution (Ray, sandbox)
-├── llm/            # LLM instance management
-└── utils/          # Utilities
+Secure task execution for untrusted code:
+
+```bash
+lattice start --head --port 8000 --sandbox seccomp  # Linux
+lattice start --head --port 8000 --sandbox subprocess  # Cross-platform
 ```
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).
 
-## 🤝 Contributing
+---
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
+> Built upon [Maze](https://github.com/QinbinLi/Maze) with enhancements for sandbox isolation, resource management, and LangGraph integration.
