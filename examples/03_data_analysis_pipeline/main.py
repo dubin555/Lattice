@@ -43,7 +43,7 @@ def generate_sample_dataset(n_samples: int = 1000) -> pd.DataFrame:
     dates = pd.date_range(start='2024-01-01', periods=n_samples, freq='h')
     
     data = {
-        'timestamp': dates,
+        'timestamp': dates.strftime('%Y-%m-%d %H:%M:%S').tolist(),
         'user_id': np.random.randint(1, 500, n_samples),
         'product_id': np.random.randint(1, 100, n_samples),
         'category': np.random.choice(['electronics', 'clothing', 'home', 'sports', 'books'], n_samples),
@@ -370,8 +370,9 @@ def main():
     elapsed = time.time() - start_time
     
     for msg in results:
-        if msg.get("type") == "task_complete":
-            output = msg.get("output", {})
+        if msg.get("type") == "finish_task":
+            data = msg.get("data", {})
+            output = data.get("result", {})
             if "final_report" in output:
                 report = output["final_report"]
                 

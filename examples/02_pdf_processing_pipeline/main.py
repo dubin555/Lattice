@@ -394,8 +394,9 @@ def main():
     elapsed = time.time() - start_time
     
     for msg in results:
-        if msg.get("type") == "task_complete":
-            output = msg.get("output", {})
+        if msg.get("type") == "finish_task":
+            data = msg.get("data", {})
+            output = data.get("result", {})
             if "report" in output:
                 report = output["report"]
                 print("\nAnalysis Report:")
