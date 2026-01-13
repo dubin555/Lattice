@@ -139,6 +139,14 @@ def process_node(state):
     return {"processed": True}
 ```
 
+**Synchronous by Design**: The LangGraph client uses synchronous blocking calls intentionally. This is the right choice because:
+
+- **Outer layer (FastAPI) is async** — multiple requests can be handled concurrently
+- **Execution engine (Ray) is async** — tasks run in parallel on distributed workers
+- **LangGraph call site blocks** — follows natural function call semantics, keeps workflow code simple
+
+An async callback pattern would add complexity (state machines, callback registration, result assembly) with little benefit — true concurrency is already handled by the layers above and below.
+
 ## Architecture
 
 ```
