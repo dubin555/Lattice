@@ -48,9 +48,20 @@ dependencies = [
     "websocket-client>=1.6.0",
     "cloudpickle>=3.0.0",
     "requests>=2.31.0",
+    # OpenTelemetry core
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    # Prometheus exporter (default backend)
+    "opentelemetry-exporter-prometheus>=0.41b0",
+    "prometheus-client>=0.17.0",
 ]
 
 [project.optional-dependencies]
+otlp = [
+    # OTLP exporters for sending metrics to collectors (Jaeger, Grafana, etc.)
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+]
 ray = [
     "ray>=2.10.0",
 ]
@@ -61,6 +72,8 @@ dev = [
 ]
 all = [
     "ray>=2.10.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "PyPDF2>=3.0.0",
     "openpyxl>=3.1.0",
     "python-docx>=0.8.11",

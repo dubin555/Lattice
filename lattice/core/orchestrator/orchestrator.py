@@ -6,6 +6,7 @@ import asyncio
 import copy
 import logging
 import multiprocessing as mp
+import time
 import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Union
@@ -13,6 +14,18 @@ from typing import Dict, List, Optional, Any, Union
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
 from lattice.core.scheduler.scheduler import run_scheduler_process
 from lattice.core.workflow.base import Workflow, LangGraphWorkflow, CodeTask, LangGraphTask
+
+# Import metrics - optional dependency
+try:
+    from lattice.observability.metrics import (
+        record_workflow_created,
+        record_workflow_started,
+        record_workflow_completed,
+        record_workflow_failed,
+    )
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +59,8 @@ class Orchestrator:
         
         self._workflows: Dict[str, Union[Workflow, LangGraphWorkflow]] = {}
         self._run_contexts: Dict[str, "RunContext"] = {}
-        
+        self._workflow_start_times: Dict[str, float] = {}  # Track workflow start times
+
         self._monitor_task: Optional[asyncio.Task] = None
 
     @property
@@ -113,6 +127,11 @@ class Orchestrator:
     def create_workflow(self, workflow_id: str) -> Workflow:
         workflow = Workflow(workflow_id)
         self._workflows[workflow_id] = workflow
+
+        # Record workflow created metric
+        if METRICS_ENABLED:
+            record_workflow_created()
+
         return workflow
 
     def get_workflow(self, workflow_id: str) -> Optional[Union[Workflow, LangGraphWorkflow]]:
@@ -131,10 +150,15 @@ class Orchestrator:
 
         run_id = str(uuid.uuid4())
         submitted_workflow = copy.deepcopy(workflow)
-        
+
         ctx = RunContext(run_id, submitted_workflow, self._message_bus)
         self._run_contexts[run_id] = ctx
+        self._workflow_start_times[run_id] = time.time()  # Record start time
         ctx.submit_start_tasks()
+
+        # Record workflow started metric
+        if METRICS_ENABLED:
+            record_workflow_started()
 
         return run_id
 
@@ -150,7 +174,18 @@ class Orchestrator:
             raise ValueError(f"Run {run_id} not found")
 
         results = await ctx.wait_complete()
-        
+
+        # Record workflow completion metric
+        if METRICS_ENABLED:
+            start_time = self._workflow_start_times.pop(run_id, None)
+            if start_time:
+                duration = time.time() - start_time
+                # Check if workflow failed (last message is exception)
+                if results and results[-1].get("type") == MessageType.TASK_EXCEPTION.value:
+                    record_workflow_failed(duration)
+                else:
+                    record_workflow_completed(duration)
+
         self._message_bus.send_to_scheduler(Message(
             message_type=MessageType.CLEAR_WORKFLOW,
             data={"workflow_id": run_id},
@@ -162,6 +197,13 @@ class Orchestrator:
         async with self._lock:
             if run_id in self._run_contexts:
                 del self._run_contexts[run_id]
+
+        # Record workflow stopped as failed
+        if METRICS_ENABLED:
+            start_time = self._workflow_start_times.pop(run_id, None)
+            if start_time:
+                duration = time.time() - start_time
+                record_workflow_failed(duration)
 
         self._message_bus.send_to_scheduler(Message(
             message_type=MessageType.STOP_WORKFLOW,

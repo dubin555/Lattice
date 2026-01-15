@@ -5,11 +5,24 @@ import signal
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from lattice.core.orchestrator import Orchestrator
 from lattice.api.routes import workflow, langgraph, worker
+
+# Import metrics - optional dependency
+try:
+    from lattice.observability import (
+        init_metrics,
+        shutdown_metrics,
+        is_initialized,
+        MetricsMiddleware,
+        ExporterType,
+    )
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
 
 
 class OrchestratorManager:
@@ -47,6 +60,8 @@ async def lifespan(app: FastAPI):
     await orchestrator.start_monitor()
     yield
     OrchestratorManager.cleanup()
+    if METRICS_AVAILABLE:
+        shutdown_metrics()
 
 
 app = FastAPI(
@@ -64,24 +79,69 @@ app.add_middleware(
 )
 
 
-def create_app(ray_head_port: int = 6379) -> FastAPI:
+def create_app(
+    ray_head_port: int = 6379,
+    metrics_enabled: bool = True,
+    metrics_exporter: str = "prometheus",
+    metrics_endpoint: Optional[str] = None,
+) -> FastAPI:
+    """
+    Create and configure the Lattice FastAPI application.
+
+    Args:
+        ray_head_port: Port for Ray head node
+        metrics_enabled: Whether to enable metrics collection
+        metrics_exporter: Metrics exporter type ("prometheus", "otlp", "otlp_http", "console")
+        metrics_endpoint: OTLP endpoint URL (required for otlp/otlp_http exporters)
+
+    Returns:
+        Configured FastAPI application
+    """
     OrchestratorManager.initialize(ray_head_port)
     orchestrator = OrchestratorManager.get()
-    
+
     workflow.set_orchestrator(orchestrator)
     langgraph.set_orchestrator(orchestrator)
     worker.set_orchestrator(orchestrator)
-    
+
     app.include_router(workflow.router)
     app.include_router(langgraph.router)
     app.include_router(worker.router)
-    
+
+    # Add metrics middleware and endpoint if enabled
+    if metrics_enabled and METRICS_AVAILABLE:
+        # Initialize OpenTelemetry metrics
+        exporter_kwargs = {}
+        if metrics_endpoint and metrics_exporter in ("otlp", "otlp_http"):
+            exporter_kwargs["endpoint"] = metrics_endpoint
+
+        init_metrics(
+            service_name="lattice",
+            exporter_type=metrics_exporter,
+            **exporter_kwargs,
+        )
+
+        app.add_middleware(MetricsMiddleware)
+
+        # Add /metrics endpoint for Prometheus scraping
+        if metrics_exporter == "prometheus":
+            @app.get("/metrics", include_in_schema=False)
+            async def metrics():
+                """Expose Prometheus metrics via OpenTelemetry."""
+                from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+                return Response(
+                    content=generate_latest(),
+                    media_type=CONTENT_TYPE_LATEST,
+                )
+
     def signal_handler(signum, frame):
         OrchestratorManager.cleanup()
-    
+        if METRICS_AVAILABLE:
+            shutdown_metrics()
+
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     return app
 
 
@@ -95,6 +155,8 @@ async def startup_event():
 
 async def shutdown_event():
     OrchestratorManager.cleanup()
+    if METRICS_AVAILABLE:
+        shutdown_metrics()
 
 
 app.add_event_handler("startup", startup_event)

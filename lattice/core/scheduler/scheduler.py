@@ -16,6 +16,7 @@ Architecture:
 import base64
 import logging
 import os
+import time
 from typing import Dict, Any, List, Optional
 
 import cloudpickle
@@ -40,6 +41,19 @@ from lattice.executor.base import (
     NodeFailedError,
 )
 from lattice.executor.factory import create_executor
+
+# Import metrics - optional dependency
+try:
+    from lattice.observability.metrics import (
+        record_task_submitted,
+        record_task_completed,
+        record_task_failed,
+        record_task_cancelled,
+        update_queue_size,
+    )
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +95,7 @@ class Scheduler:
         self._pending_tasks: List[BaseTaskRuntime] = []
         self._task_handles: Dict[str, TaskHandle] = {}
         self._handle_to_task: Dict[Any, str] = {}
+        self._task_start_times: Dict[str, float] = {}  # Track task start times for metrics
         self._running = False
 
     def start(self) -> None:
@@ -133,7 +148,7 @@ class Scheduler:
         remaining = []
         for task in self._pending_tasks:
             self._workflow_manager.add_task(task)
-            
+
             if self._executor_type == ExecutorType.LOCAL:
                 self._submit_task(task, None)
             else:
@@ -144,6 +159,10 @@ class Scheduler:
                 else:
                     remaining.append(task)
         self._pending_tasks = remaining
+
+        # Update queue size metric
+        if METRICS_ENABLED:
+            update_queue_size(len(self._pending_tasks))
 
     def _submit_task(self, task: BaseTaskRuntime, node: Optional[SelectedNode]) -> None:
         try:
@@ -170,8 +189,13 @@ class Scheduler:
             handle = self._executor.submit(submission)
             self._task_handles[task.task_id] = handle
             self._handle_to_task[handle.handle_id] = task.task_id
+            self._task_start_times[task.task_id] = time.time()  # Record start time
             self._workflow_manager.run_task(task, handle.handle_id, node)
-            
+
+            # Record task submitted metric
+            if METRICS_ENABLED:
+                record_task_submitted(task.workflow_id)
+
             self._send(MessageType.START_TASK, {
                 "workflow_id": task.workflow_id,
                 "task_id": task.task_id,
@@ -217,6 +241,14 @@ class Scheduler:
             self._workflow_manager.set_task_result(task, result)
             self._release_resources(task)
             self._cleanup_handle(task.task_id, handle)
+
+            # Record task completed metric
+            if METRICS_ENABLED:
+                start_time = self._task_start_times.pop(task.task_id, None)
+                if start_time:
+                    duration = time.time() - start_time
+                    record_task_completed(task.workflow_id, duration)
+
             self._send(MessageType.FINISH_TASK, {
                 "workflow_id": task.workflow_id,
                 "task_id": task.task_id,
@@ -224,12 +256,21 @@ class Scheduler:
             })
         except TaskCancelledError:
             self._cleanup_handle(task.task_id, handle)
+            # Record task cancelled metric
+            if METRICS_ENABLED:
+                self._task_start_times.pop(task.task_id, None)
+                record_task_cancelled(task.workflow_id)
         except NodeFailedError:
             self._cleanup_handle(task.task_id, handle)
             task.set_status(task.status.__class__.READY)
             self._pending_tasks.append(task)
         except TaskError as e:
             self._cleanup_handle(task.task_id, handle)
+            # Record task failed metric
+            if METRICS_ENABLED:
+                start_time = self._task_start_times.pop(task.task_id, None)
+                duration = time.time() - start_time if start_time else None
+                record_task_failed(task.workflow_id, duration)
             self._handle_task_failure(task, str(e))
 
     def _cleanup_handle(self, task_id: str, handle: TaskHandle) -> None:
