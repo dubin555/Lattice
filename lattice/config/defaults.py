@@ -71,6 +71,50 @@ class SchedulerDefaults:
 
 
 @dataclass(frozen=True)
+class BatchDefaults:
+    """Default batching configuration for tasks.
+
+    These defaults apply when a task enables batching but doesn't specify
+    all batching parameters. Individual task configurations override these.
+    """
+    default_batch_size: int = 32
+    default_batch_timeout: float = 0.1  # seconds
+    max_batch_size: int = 256
+    max_batch_timeout: float = 5.0  # seconds
+
+
+@dataclass
+class BatchRule:
+    """A rule for matching tasks to batching configuration.
+
+    Tasks can be matched by:
+    - exact name match
+    - prefix match (e.g., "embed_" matches "embed_texts", "embed_images")
+    - regex pattern match (e.g., ".*_embedding$")
+    """
+    pattern: str
+    match_type: str = "exact"  # "exact", "prefix", or "regex"
+    batch_size: int = 32
+    batch_timeout: float = 0.1  # seconds
+    group_key: Optional[str] = None  # custom group key, defaults to pattern
+
+    def matches(self, task_name: str) -> bool:
+        """Check if this rule matches the given task name."""
+        import re
+        if self.match_type == "exact":
+            return task_name == self.pattern
+        elif self.match_type == "prefix":
+            return task_name.startswith(self.pattern)
+        elif self.match_type == "regex":
+            return bool(re.match(self.pattern, task_name))
+        return False
+
+    def get_group_key(self) -> str:
+        """Get the group key for batching tasks together."""
+        return self.group_key or self.pattern
+
+
+@dataclass(frozen=True)
 class ClientDefaults:
     """Default client configuration."""
     timeout: int = 30  # seconds for HTTP requests
@@ -83,6 +127,7 @@ RESOURCE_DEFAULTS = ResourceDefaults()
 SERVER_DEFAULTS = ServerDefaults()
 SANDBOX_DEFAULTS = SandboxDefaults()
 SCHEDULER_DEFAULTS = SchedulerDefaults()
+BATCH_DEFAULTS = BatchDefaults()
 CLIENT_DEFAULTS = ClientDefaults()
 
 

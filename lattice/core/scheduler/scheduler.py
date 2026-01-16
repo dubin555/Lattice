@@ -22,6 +22,7 @@ from typing import Dict, Any, List, Optional
 import cloudpickle
 
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
+from lattice.core.scheduler.batch_collector import BatchCollector, BatchConfig
 from lattice.core.resource.manager import ResourceManager, TaskResourceRequirements
 from lattice.core.resource.node import SelectedNode
 from lattice.core.runtime.task import (
@@ -40,6 +41,7 @@ from lattice.executor.base import (
     TaskCancelledError,
     NodeFailedError,
 )
+from lattice.config.defaults import BatchRule
 from lattice.executor.factory import create_executor
 
 # Import metrics - optional dependency
@@ -78,6 +80,36 @@ def _run_code_task(code_str: Optional[str], serialized_code: Optional[str], task
         raise ValueError("Either code_str or serialized_code must be provided")
 
 
+def _run_batch_task(
+    code_str: Optional[str],
+    serialized_code: Optional[str],
+    batched_inputs: List[Dict[str, Any]],
+) -> List[Any]:
+    """Execute a task function with batched inputs.
+
+    The task function is expected to handle batched inputs if it's marked
+    as batchable. The function receives a list of input dicts and should
+    return a list of results (one per input).
+    """
+    if serialized_code is not None:
+        func = cloudpickle.loads(base64.b64decode(serialized_code))
+    elif code_str is not None:
+        from lattice.executor.runner import CodeRunner
+        # For code string, we need to execute each input separately
+        # as CodeRunner doesn't support batch execution
+        results = []
+        for input_data in batched_inputs:
+            result = CodeRunner(code_str, input_data).run()
+            results.append(result)
+        return results
+    else:
+        raise ValueError("Either code_str or serialized_code must be provided")
+
+    # Call function with batched inputs
+    # The function should be designed to handle a list of inputs
+    return func(batched_inputs)
+
+
 class Scheduler:
     """
     Task scheduler that runs in a background thread.
@@ -91,6 +123,7 @@ class Scheduler:
         message_bus: MessageBus,
         executor_type: ExecutorType = ExecutorType.RAY,
         ray_head_port: int = 6379,
+        batch_rules: Optional[List[BatchRule]] = None,
     ):
         self._message_bus = message_bus
         self._executor_type = executor_type
@@ -99,10 +132,12 @@ class Scheduler:
         self._executor: Optional[ExecutorBackend] = None
         self._workflow_manager = WorkflowRuntimeManager()
         self._resource_manager = ResourceManager()
+        self._batch_collector = BatchCollector(rules=batch_rules)
         self._pending_tasks: List[BaseTaskRuntime] = []
         self._task_handles: Dict[str, TaskHandle] = {}
         self._handle_to_task: Dict[Any, str] = {}
         self._task_start_times: Dict[str, float] = {}
+        self._batch_tasks: Dict[str, List[CodeTaskRuntime]] = {}  # batch_id -> tasks
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -145,6 +180,7 @@ class Scheduler:
             if msg:
                 self._handle_message(msg)
             self._dispatch_pending_tasks()
+            self._dispatch_batched_tasks()
             self._check_completed_tasks()
             if self._executor_type == ExecutorType.RAY:
                 self._resource_manager.check_node_health()
@@ -166,11 +202,25 @@ class Scheduler:
             handler(message.data)
 
     def _dispatch_pending_tasks(self) -> None:
-        """Dispatch pending tasks to available nodes."""
+        """Dispatch pending tasks to available nodes.
+
+        For batchable tasks, they are collected in BatchCollector.
+        For non-batchable tasks, they are dispatched immediately.
+        """
         remaining = []
         for task in self._pending_tasks:
             self._workflow_manager.add_task(task)
 
+            # Check if task is batchable
+            if isinstance(task, CodeTaskRuntime) and task.is_batchable:
+                task_name = task.task_name or task.task_id
+                batch_config = None
+                if task.batch_config:
+                    batch_config = BatchConfig.from_dict(task.batch_config)
+                self._batch_collector.add_task(task_name, task, batch_config)
+                continue
+
+            # Non-batchable tasks: dispatch immediately
             if self._executor_type == ExecutorType.LOCAL:
                 self._submit_task(task, None)
             else:
@@ -183,7 +233,88 @@ class Scheduler:
         self._pending_tasks = remaining
 
         if METRICS_ENABLED:
-            update_queue_size(len(self._pending_tasks))
+            update_queue_size(len(self._pending_tasks) + self._batch_collector.pending_count())
+
+    def _dispatch_batched_tasks(self) -> None:
+        """Check and dispatch ready batches."""
+        ready_batches = self._batch_collector.get_ready_batches()
+        for group_key, tasks in ready_batches.items():
+            if not tasks:
+                continue
+            logger.debug(f"Dispatching batch '{group_key}' with {len(tasks)} tasks")
+            self._submit_batch(group_key, tasks)
+
+    def _submit_batch(self, group_key: str, tasks: List[CodeTaskRuntime]) -> None:
+        """Submit a batch of tasks for execution.
+
+        For batched execution, we:
+        1. Collect all inputs into a list
+        2. Execute the function once with the batched inputs
+        3. Distribute results back to individual tasks
+        """
+        if not tasks:
+            return
+
+        # Use the first task as a template for code and resources
+        template_task = tasks[0]
+
+        # Collect all inputs into a batch
+        batched_inputs = []
+        for task in tasks:
+            task_input_data = self._resolve_inputs(task)
+            batched_inputs.append(task_input_data)
+
+        # Select node based on template task resources
+        node = None
+        if self._executor_type != ExecutorType.LOCAL:
+            requirements = TaskResourceRequirements.from_dict(template_task.resources)
+            node = self._resource_manager.select_node(requirements)
+            if not node:
+                # Put tasks back to batch collector
+                for task in tasks:
+                    task_name = task.task_name or task.task_id
+                    self._batch_collector.add_task(task_name, task)
+                return
+
+        # Submit batch execution
+        try:
+            submission = TaskSubmission(
+                func=_run_batch_task,
+                args=(template_task.code_str, template_task.serialized_code, batched_inputs),
+                resources=template_task.resources,
+                node_id=node.node_id if node else None,
+                gpu_id=node.gpu_id if node else None,
+            )
+
+            handle = self._executor.submit(submission)
+
+            # Track all tasks in this batch
+            batch_id = f"batch_{group_key}_{template_task.task_id}"
+            self._task_handles[batch_id] = handle
+            self._handle_to_task[handle.handle_id] = batch_id
+            self._task_start_times[batch_id] = time.time()
+
+            # Store batch info for result distribution
+            self._batch_tasks[batch_id] = tasks
+
+            for task in tasks:
+                self._workflow_manager.run_task(task, handle.handle_id, node)
+                if METRICS_ENABLED:
+                    record_task_submitted(task.workflow_id)
+                self._send(MessageType.START_TASK, {
+                    "workflow_id": task.workflow_id,
+                    "task_id": task.task_id,
+                    "node_ip": node.node_ip if node else "local",
+                    "node_id": node.node_id if node else "local",
+                    "gpu_id": node.gpu_id if node else None,
+                    "batch_id": batch_id,
+                })
+
+        except Exception as e:
+            logger.error(f"Failed to submit batch {group_key}: {e}")
+            # Put tasks back to pending
+            for task in tasks:
+                self._pending_tasks.append(task)
 
     def _submit_task(self, task: BaseTaskRuntime, node: Optional[SelectedNode]) -> None:
         """Submit a task to the executor."""
@@ -252,11 +383,81 @@ class Scheduler:
             task_id = self._handle_to_task.get(handle.handle_id)
             if not task_id:
                 continue
+
+            # Check if this is a batch result
+            if task_id in self._batch_tasks:
+                self._handle_batch_result(task_id, handle)
+                continue
+
             workflow = self._workflow_manager.get_workflow_by_task_id(task_id)
             if workflow:
                 task_obj = workflow.get_task(task_id)
                 if task_obj:
                     self._handle_task_result(task_obj, handle)
+
+    def _handle_batch_result(self, batch_id: str, handle: TaskHandle) -> None:
+        """Handle the result of a completed batch."""
+        tasks = self._batch_tasks.get(batch_id, [])
+        if not tasks:
+            self._cleanup_handle(batch_id, handle)
+            return
+
+        try:
+            results = self._executor.get_result(handle)
+
+            # Distribute results to individual tasks
+            if not isinstance(results, list):
+                # If function returns a single result, use it for all tasks
+                results = [results] * len(tasks)
+
+            for i, task in enumerate(tasks):
+                result = results[i] if i < len(results) else None
+                self._workflow_manager.set_task_result(task, result)
+                self._release_resources(task)
+
+                if METRICS_ENABLED:
+                    start_time = self._task_start_times.get(batch_id)
+                    if start_time:
+                        duration = time.time() - start_time
+                        record_task_completed(task.workflow_id, duration)
+
+                self._send(MessageType.FINISH_TASK, {
+                    "workflow_id": task.workflow_id,
+                    "task_id": task.task_id,
+                    "result": result,
+                })
+
+            self._cleanup_handle(batch_id, handle)
+            self._task_start_times.pop(batch_id, None)
+            del self._batch_tasks[batch_id]
+
+        except TaskCancelledError:
+            self._cleanup_handle(batch_id, handle)
+            self._task_start_times.pop(batch_id, None)
+            for task in tasks:
+                if METRICS_ENABLED:
+                    record_task_cancelled(task.workflow_id)
+            del self._batch_tasks[batch_id]
+
+        except NodeFailedError:
+            self._cleanup_handle(batch_id, handle)
+            # Put tasks back to pending for retry
+            for task in tasks:
+                task.set_status(task.status.__class__.READY)
+                self._pending_tasks.append(task)
+            del self._batch_tasks[batch_id]
+
+        except TaskError as e:
+            self._cleanup_handle(batch_id, handle)
+            if METRICS_ENABLED:
+                start_time = self._task_start_times.pop(batch_id, None)
+                duration = time.time() - start_time if start_time else None
+                for task in tasks:
+                    record_task_failed(task.workflow_id, duration)
+            # Fail all tasks in the batch
+            for task in tasks:
+                self._handle_task_failure(task, str(e))
+            del self._batch_tasks[batch_id]
 
     def _handle_task_result(self, task: BaseTaskRuntime, handle: TaskHandle) -> None:
         """Handle the result of a completed task."""

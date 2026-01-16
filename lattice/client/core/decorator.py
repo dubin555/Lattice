@@ -12,6 +12,29 @@ from lattice.config.defaults import get_default_resources
 
 
 @dataclass
+class BatchConfig:
+    """Configuration for task batching."""
+    enabled: bool = False
+    batch_size: int = 1
+    batch_timeout: float = 0.0  # seconds, 0 means no timeout
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "batch_size": self.batch_size,
+            "batch_timeout": self.batch_timeout,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BatchConfig":
+        return cls(
+            enabled=data.get("enabled", False),
+            batch_size=data.get("batch_size", 1),
+            batch_timeout=data.get("batch_timeout", 0.0),
+        )
+
+
+@dataclass
 class TaskMetadata:
     func: Callable
     func_name: str
@@ -21,6 +44,11 @@ class TaskMetadata:
     outputs: List[str]
     resources: Dict[str, Any]
     data_types: Dict[str, str]
+    batch_config: BatchConfig = None
+
+    def __post_init__(self):
+        if self.batch_config is None:
+            self.batch_config = BatchConfig()
 
 
 def normalize_resources(resources: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -48,29 +76,49 @@ def task(
     outputs: List[str],
     resources: Optional[Dict[str, Any]] = None,
     data_types: Optional[Dict[str, str]] = None,
+    batch_size: int = 0,
+    batch_timeout: float = 0.0,
 ):
+    """
+    Decorator to define a Lattice task.
+
+    Args:
+        inputs: List of input parameter names.
+        outputs: List of output parameter names.
+        resources: Resource requirements (cpu, cpu_mem, gpu, gpu_mem).
+        data_types: Data type hints for inputs and outputs.
+        batch_size: Maximum batch size for batching. 0 means no batching.
+        batch_timeout: Maximum wait time in seconds before triggering a batch.
+            0 means no timeout (only trigger on batch_size).
+    """
     def decorator(func: Callable) -> Callable:
         source_lines = inspect.getsourcelines(func)[0]
-        
+
         func_start_idx = 0
         for idx, line in enumerate(source_lines):
             if line.strip().startswith("def "):
                 func_start_idx = idx
                 break
-        
+
         func_lines = source_lines[func_start_idx:]
         code_str = "".join(func_lines)
-        
+
         serialized_code = base64.b64encode(cloudpickle.dumps(func)).decode("utf-8")
-        
+
         resources_config = normalize_resources(resources)
-        
+
         if data_types is None:
             types_config = {param: "str" for param in inputs + outputs}
         else:
             types_config = {param: "str" for param in inputs + outputs}
             types_config.update(data_types)
-        
+
+        batch_config = BatchConfig(
+            enabled=batch_size > 0,
+            batch_size=batch_size if batch_size > 0 else 1,
+            batch_timeout=batch_timeout,
+        )
+
         metadata = TaskMetadata(
             func=func,
             func_name=func.__name__,
@@ -80,11 +128,12 @@ def task(
             outputs=outputs,
             resources=resources_config,
             data_types=types_config,
+            batch_config=batch_config,
         )
-        
+
         func._lattice_task_metadata = metadata
         return func
-    
+
     return decorator
 
 

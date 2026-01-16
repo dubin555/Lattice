@@ -59,11 +59,13 @@ class LatticeWorkflow:
         save_data = {
             "workflow_id": self.workflow_id,
             "task_id": task_id,
+            "task_name": task_name,
             "code_str": metadata.code_str,
             "code_ser": metadata.serialized_code,
             "task_input": task_input,
             "task_output": task_output,
             "resources": metadata.resources,
+            "batch_config": metadata.batch_config.to_dict() if metadata.batch_config else None,
         }
         
         save_response = requests.post(save_url, json=save_data)

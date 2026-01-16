@@ -131,6 +131,7 @@ async def save_task_and_add_edge(request: Request):
             code_str=code_str,
             serialized_code=code_ser,
             resources=data["resources"],
+            batch_config=data.get("batch_config"),
         )
 
         input_params = data["task_input"].get("input_params", {})

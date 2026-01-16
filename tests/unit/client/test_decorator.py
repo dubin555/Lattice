@@ -7,6 +7,7 @@ from lattice.client.core.decorator import (
     get_task_metadata,
     normalize_resources,
     TaskMetadata,
+    BatchConfig,
 )
 
 
@@ -106,3 +107,65 @@ class TestGetTaskMetadata:
 
         with pytest.raises(ValueError, match="not decorated with @task"):
             get_task_metadata(undecorated)
+
+
+class TestBatchConfig:
+    def test_default_batch_config(self):
+        @task(inputs=["x"], outputs=["y"])
+        def no_batch(params):
+            return {"y": params["x"]}
+
+        metadata = get_task_metadata(no_batch)
+        assert metadata.batch_config is not None
+        assert metadata.batch_config.enabled is False
+        assert metadata.batch_config.batch_size == 1
+        assert metadata.batch_config.batch_timeout == 0.0
+
+    def test_batch_size_enables_batching(self):
+        @task(inputs=["texts"], outputs=["embeddings"], batch_size=32)
+        def embed_texts(params):
+            return {"embeddings": [[0.1] * 768] * len(params["texts"])}
+
+        metadata = get_task_metadata(embed_texts)
+        assert metadata.batch_config.enabled is True
+        assert metadata.batch_config.batch_size == 32
+        assert metadata.batch_config.batch_timeout == 0.0
+
+    def test_batch_size_and_timeout(self):
+        @task(
+            inputs=["texts"],
+            outputs=["embeddings"],
+            batch_size=64,
+            batch_timeout=0.1,
+        )
+        def embed_with_timeout(params):
+            return {"embeddings": [[0.1] * 768] * len(params["texts"])}
+
+        metadata = get_task_metadata(embed_with_timeout)
+        assert metadata.batch_config.enabled is True
+        assert metadata.batch_config.batch_size == 64
+        assert metadata.batch_config.batch_timeout == 0.1
+
+    def test_zero_batch_size_disables_batching(self):
+        @task(inputs=["x"], outputs=["y"], batch_size=0)
+        def no_batch(params):
+            return {"y": params["x"]}
+
+        metadata = get_task_metadata(no_batch)
+        assert metadata.batch_config.enabled is False
+
+    def test_batch_config_to_dict(self):
+        config = BatchConfig(enabled=True, batch_size=32, batch_timeout=0.1)
+        data = config.to_dict()
+        assert data == {
+            "enabled": True,
+            "batch_size": 32,
+            "batch_timeout": 0.1,
+        }
+
+    def test_batch_config_from_dict(self):
+        data = {"enabled": True, "batch_size": 64, "batch_timeout": 0.2}
+        config = BatchConfig.from_dict(data)
+        assert config.enabled is True
+        assert config.batch_size == 64
+        assert config.batch_timeout == 0.2

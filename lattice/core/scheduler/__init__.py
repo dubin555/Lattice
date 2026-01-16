@@ -6,6 +6,11 @@ from lattice.core.scheduler.message_bus import (
     MessageType,
     MessageBus,
 )
+from lattice.core.scheduler.batch_collector import (
+    BatchCollector,
+    BatchConfig,
+    BatchGroup,
+)
 
 def __getattr__(name):
     if name in ("Scheduler", "run_scheduler_process"):
@@ -19,4 +24,7 @@ __all__ = [
     "MessageBus",
     "Scheduler",
     "run_scheduler_process",
+    "BatchCollector",
+    "BatchConfig",
+    "BatchGroup",
 ]

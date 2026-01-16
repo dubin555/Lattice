@@ -42,6 +42,7 @@ class CodeTask(BaseTask):
     task_output: Optional[Dict[str, Any]] = None
     code_str: Optional[str] = None
     serialized_code: Optional[str] = None
+    batch_config: Optional[Dict[str, Any]] = None
 
     @property
     def task_type(self) -> TaskType:
@@ -54,12 +55,14 @@ class CodeTask(BaseTask):
         code_str: Optional[str] = None,
         serialized_code: Optional[str] = None,
         resources: Optional[Dict[str, Any]] = None,
+        batch_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.task_input = task_input
         self.task_output = task_output
         self.code_str = code_str
         self.serialized_code = serialized_code
         self.resources = resources or DEFAULT_RESOURCES.copy()
+        self.batch_config = batch_config
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -72,6 +75,7 @@ class CodeTask(BaseTask):
             "resources": self.resources,
             "code_str": self.code_str,
             "code_ser": self.serialized_code,
+            "batch_config": self.batch_config,
         }
 
 

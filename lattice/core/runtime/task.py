@@ -76,21 +76,32 @@ class CodeTaskRuntime(BaseTaskRuntime):
     task_output: Dict[str, Any] = field(default_factory=dict)
     code_str: Optional[str] = None
     serialized_code: Optional[str] = None
+    task_name: Optional[str] = None
+    batch_config: Optional[Dict[str, Any]] = None
 
     @property
     def task_type(self) -> TaskType:
         return TaskType.CODE
+
+    @property
+    def is_batchable(self) -> bool:
+        """Check if this task supports batching."""
+        if not self.batch_config:
+            return False
+        return self.batch_config.get("enabled", False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "task_type": self.task_type.value,
             "workflow_id": self.workflow_id,
             "task_id": self.task_id,
+            "task_name": self.task_name,
             "task_input": self.task_input,
             "task_output": self.task_output,
             "resources": self.resources,
             "code_str": self.code_str,
             "code_ser": self.serialized_code,
+            "batch_config": self.batch_config,
             "status": self.status.value,
         }
 
@@ -104,6 +115,8 @@ class CodeTaskRuntime(BaseTaskRuntime):
             task_output=data.get("task_output", {}),
             code_str=data.get("code_str"),
             serialized_code=data.get("code_ser"),
+            task_name=data.get("task_name"),
+            batch_config=data.get("batch_config"),
         )
 
 
