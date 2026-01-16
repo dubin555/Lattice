@@ -1,12 +1,12 @@
 """
-Message bus for inter-process communication.
-Replaces ZeroMQ with Python multiprocessing queues.
+Message bus for inter-thread communication.
+Uses Python queue.Queue for thread-safe message passing.
 """
-import multiprocessing as mp
+import queue
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
-from queue import Empty
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,18 +17,18 @@ class MessageType(Enum):
     START_TASK = "start_task"
     FINISH_TASK = "finish_task"
     TASK_EXCEPTION = "task_exception"
-    
+
     CLEAR_WORKFLOW = "clear_workflow"
     STOP_WORKFLOW = "stop_workflow"
     FINISH_WORKFLOW = "finish_workflow"
-    
+
     START_WORKER = "start_worker"
     STOP_WORKER = "stop_worker"
-    
+
     START_LLM_INSTANCE = "start_llm_instance"
     STOP_LLM_INSTANCE = "stop_llm_instance"
     FINISH_LLM_INSTANCE_LAUNCH = "finish_llm_instance_launch"
-    
+
     SHUTDOWN = "shutdown"
 
 
@@ -50,52 +50,52 @@ class Message:
 
 
 class MessageBus:
+    """Thread-safe message bus for communication between Orchestrator and Scheduler."""
+
     def __init__(self):
-        self._to_scheduler: mp.Queue = mp.Queue()
-        self._from_scheduler: mp.Queue = mp.Queue()
-        self._ready_queue: mp.Queue = mp.Queue()
+        self._to_scheduler: queue.Queue = queue.Queue()
+        self._from_scheduler: queue.Queue = queue.Queue()
+        self._ready_event: threading.Event = threading.Event()
 
     @property
-    def to_scheduler_queue(self) -> mp.Queue:
+    def to_scheduler_queue(self) -> queue.Queue:
         return self._to_scheduler
 
     @property
-    def from_scheduler_queue(self) -> mp.Queue:
+    def from_scheduler_queue(self) -> queue.Queue:
         return self._from_scheduler
 
-    @property
-    def ready_queue(self) -> mp.Queue:
-        return self._ready_queue
-
     def send_to_scheduler(self, message: Message) -> None:
+        """Send a message to the scheduler thread."""
         self._to_scheduler.put(message)
 
     def receive_from_scheduler(self, timeout: Optional[float] = None) -> Optional[Message]:
+        """Receive a message from the scheduler thread."""
         try:
             return self._from_scheduler.get(timeout=timeout)
-        except Empty:
+        except queue.Empty:
             return None
 
     def send_from_scheduler(self, message: Message) -> None:
+        """Send a message from the scheduler thread."""
         self._from_scheduler.put(message)
 
     def receive_in_scheduler(self, timeout: Optional[float] = None) -> Optional[Message]:
+        """Receive a message in the scheduler thread."""
         try:
             return self._to_scheduler.get(timeout=timeout)
-        except Empty:
+        except queue.Empty:
             return None
 
     def signal_ready(self) -> None:
-        self._ready_queue.put("ready")
+        """Signal that the scheduler is ready."""
+        self._ready_event.set()
 
     def wait_ready(self, timeout: Optional[float] = None) -> bool:
-        try:
-            msg = self._ready_queue.get(timeout=timeout)
-            return msg == "ready"
-        except Empty:
-            return False
+        """Wait for the scheduler to be ready."""
+        return self._ready_event.wait(timeout=timeout)
 
     def close(self) -> None:
-        self._to_scheduler.close()
-        self._from_scheduler.close()
-        self._ready_queue.close()
+        """Clean up resources."""
+        # queue.Queue doesn't need explicit closing
+        pass
