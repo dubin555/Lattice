@@ -1,64 +1,28 @@
 """
-Sandbox execution environment for secure task execution.
+Subprocess-based sandbox execution.
 
-Provides multiple isolation levels:
-- NONE: Direct execution (fastest, no isolation)
-- SUBPROCESS: Run in separate process with resource limits
-- DOCKER: Run in Docker container (strongest isolation)
+Provides isolated task execution in a separate process with optional
+seccomp filtering for additional security on Linux systems.
 
-Note: The embedded runner scripts (RUNNER_TEMPLATE, DOCKER_RUNNER_SCRIPT) contain
-execute_code logic that is derived from the utilities in code_executor.py.
-These scripts must remain self-contained since they run in isolated environments
-(subprocesses or Docker containers) without access to the main Lattice codebase.
-Any changes to the core execution logic in code_executor.py should be reflected
-in these embedded scripts to maintain consistency.
+Note: The embedded runner scripts (RUNNER_TEMPLATE) contain execute_code logic
+that is derived from the utilities in code_executor.py. These scripts must
+remain self-contained since they run in isolated environments (subprocesses)
+without access to the main Lattice codebase.
 """
 import os
 import sys
 import json
 import signal
-import base64
 import tempfile
 import subprocess
-import logging
-from enum import Enum
 from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
-
-
-class SandboxLevel(str, Enum):
-    """Sandbox isolation levels."""
-    NONE = "none"
-    SUBPROCESS = "subprocess"
-    SECCOMP = "seccomp"
-    DOCKER = "docker"
-
-
-@dataclass
-class SandboxConfig:
-    level: SandboxLevel = SandboxLevel.SUBPROCESS
-    timeout: int = 300
-    max_memory_mb: int = 2048
-    max_cpu_time: int = 300
-    allowed_imports: Optional[list] = None
-    docker_image: str = "python:3.11-slim"
-    network_enabled: bool = False
-    mount_paths: Dict[str, str] = field(default_factory=dict)
-    allowed_syscalls: Optional[list] = None
-
-
-class SandboxError(Exception):
-    pass
-
-
-class TimeoutError(SandboxError):
-    pass
-
-
-class ResourceLimitError(SandboxError):
-    pass
+from lattice.executor.sandbox.base import (
+    SandboxConfig,
+    SandboxLevel,
+    SandboxError,
+    TimeoutError,
+)
 
 
 # RUNNER_TEMPLATE: Self-contained Python script for subprocess execution.
@@ -143,7 +107,9 @@ if __name__ == "__main__":
     main()
 '''
 
+# Seccomp-specific code that gets injected into RUNNER_TEMPLATE
 SECCOMP_EXTRA_IMPORTS = "import ctypes\nimport struct"
+
 SECCOMP_EXTRA_CODE = '''
 SECCOMP_MODE_FILTER = 2
 PR_SET_SECCOMP = 22
@@ -207,6 +173,7 @@ def apply_seccomp_filter(allowed_syscalls=None):
         return False
     return True
 '''
+
 SECCOMP_EXTRA_LIMITS = '''
     try:
         resource.setrlimit(resource.RLIMIT_NPROC, (50, 50))
@@ -216,6 +183,7 @@ SECCOMP_EXTRA_LIMITS = '''
         resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
     except (ValueError, resource.error):
         pass'''
+
 SECCOMP_PRE_EXECUTE = '''
     import platform
     if platform.system() == "Linux":
@@ -226,6 +194,7 @@ SECCOMP_PRE_EXECUTE = '''
 
 
 def _build_runner_script(level: SandboxLevel) -> str:
+    """Build the runner script with appropriate security features."""
     if level == SandboxLevel.SECCOMP:
         return RUNNER_TEMPLATE.format(
             extra_imports=SECCOMP_EXTRA_IMPORTS,
@@ -242,6 +211,8 @@ def _build_runner_script(level: SandboxLevel) -> str:
 
 
 class SubprocessSandbox:
+    """Execute tasks in isolated subprocess with resource limits."""
+
     def __init__(self, config: SandboxConfig):
         self.config = config
         self._runner_script = _build_runner_script(
@@ -254,6 +225,20 @@ class SubprocessSandbox:
         serialized_code: Optional[str] = None,
         task_input_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Execute code in an isolated subprocess.
+
+        Args:
+            code_str: Python code string containing a function definition.
+            serialized_code: Base64-encoded cloudpickle serialized function.
+            task_input_data: Input data to pass to the function.
+
+        Returns:
+            The result returned by the executed function.
+
+        Raises:
+            TimeoutError: If execution exceeds the configured timeout.
+            SandboxError: If execution fails for any other reason.
+        """
         input_data = {
             "code_str": code_str,
             "serialized_code": serialized_code,
@@ -308,174 +293,3 @@ class SubprocessSandbox:
                 os.unlink(runner_path)
             except OSError:
                 pass
-
-
-# DOCKER_RUNNER_SCRIPT: Self-contained Python script for Docker container execution.
-# The execute_code function below is derived from lattice.executor.code_executor
-# but must be embedded here since Docker containers don't have access to the Lattice package.
-DOCKER_RUNNER_SCRIPT = '''
-import sys
-import json
-import base64
-
-def execute_code(serialized_code, code_str, task_input_data):
-    if serialized_code:
-        import cloudpickle
-        return cloudpickle.loads(base64.b64decode(serialized_code))(task_input_data)
-    elif code_str:
-        import ast
-        tree = ast.parse(code_str)
-        func_node = None
-        import_nodes = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                func_node = node
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                import_nodes.append(node)
-        if func_node is None:
-            raise ValueError("No function definition found")
-        namespace = {}
-        for imp in import_nodes:
-            exec(compile(ast.Module(body=[imp], type_ignores=[]), '<string>', 'exec'), namespace)
-        exec(compile(ast.Module(body=[func_node], type_ignores=[]), '<string>', 'exec'), namespace)
-        return namespace[func_node.name](task_input_data)
-    raise ValueError("No code provided")
-
-input_data = json.loads(sys.stdin.read())
-try:
-    result = execute_code(input_data.get("serialized_code"), input_data.get("code_str"), input_data.get("task_input_data", {}))
-    print(json.dumps({"success": True, "result": result}))
-except Exception as e:
-    print(json.dumps({"success": False, "error": str(e), "error_type": type(e).__name__}))
-    sys.exit(1)
-'''
-
-
-class DockerSandbox:
-    def __init__(self, config: SandboxConfig):
-        self.config = config
-        self._check_docker()
-
-    def _check_docker(self):
-        try:
-            subprocess.run(["docker", "version"], capture_output=True, check=True, timeout=10)
-        except (subprocess.SubprocessError, FileNotFoundError):
-            raise SandboxError("Docker is not available.")
-
-    def execute(
-        self,
-        code_str: Optional[str] = None,
-        serialized_code: Optional[str] = None,
-        task_input_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        input_data = {
-            "code_str": code_str,
-            "serialized_code": serialized_code,
-            "task_input_data": task_input_data or {},
-        }
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(DOCKER_RUNNER_SCRIPT)
-            runner_path = f.name
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(input_data, f)
-            input_path = f.name
-
-        try:
-            docker_cmd = [
-                "docker", "run", "--rm", "-i",
-                f"--memory={self.config.max_memory_mb}m", "--cpus=1",
-                "--pids-limit=100", "--read-only", "--tmpfs=/tmp:size=100m",
-            ]
-            if not self.config.network_enabled:
-                docker_cmd.append("--network=none")
-            docker_cmd.extend(["--security-opt=no-new-privileges", "--cap-drop=ALL"])
-            docker_cmd.extend(["-v", f"{runner_path}:/app/runner.py:ro"])
-            for host, cont in self.config.mount_paths.items():
-                docker_cmd.extend(["-v", f"{host}:{cont}:ro"])
-            docker_cmd.extend([self.config.docker_image, "python", "/app/runner.py"])
-
-            with open(input_path, 'r') as inp:
-                process = subprocess.Popen(docker_cmd, stdin=inp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                stdout, stderr = process.communicate(timeout=self.config.timeout + 30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                raise TimeoutError(f"Docker execution timed out after {self.config.timeout}s")
-
-            if process.returncode != 0:
-                try:
-                    result = json.loads(stdout)
-                    if not result.get("success"):
-                        raise SandboxError(f"{result.get('error_type', 'Error')}: {result.get('error')}")
-                except json.JSONDecodeError:
-                    raise SandboxError(f"Docker execution failed: {stderr or stdout}")
-
-            result = json.loads(stdout)
-            if result.get("success"):
-                return result.get("result")
-            raise SandboxError(f"{result.get('error_type', 'Error')}: {result.get('error')}")
-        finally:
-            try:
-                os.unlink(runner_path)
-                os.unlink(input_path)
-            except OSError:
-                pass
-
-
-class SandboxExecutor:
-    def __init__(self, config: Optional[SandboxConfig] = None):
-        self.config = config or SandboxConfig()
-        self._sandbox = self._create_sandbox()
-
-    def _create_sandbox(self):
-        if self.config.level == SandboxLevel.NONE:
-            return None
-        elif self.config.level in (SandboxLevel.SUBPROCESS, SandboxLevel.SECCOMP):
-            return SubprocessSandbox(self.config)
-        elif self.config.level == SandboxLevel.DOCKER:
-            return DockerSandbox(self.config)
-        raise ValueError(f"Unknown sandbox level: {self.config.level}")
-
-    def execute(
-        self,
-        code_str: Optional[str] = None,
-        serialized_code: Optional[str] = None,
-        task_input_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        if self.config.level == SandboxLevel.NONE:
-            return self._execute_direct(code_str, serialized_code, task_input_data)
-        return self._sandbox.execute(code_str, serialized_code, task_input_data)
-
-    def _execute_direct(
-        self,
-        code_str: Optional[str],
-        serialized_code: Optional[str],
-        task_input_data: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Execute task directly without sandbox isolation.
-
-        Uses the unified code execution utilities from code_executor.
-        """
-        from lattice.executor.code_executor import execute_task
-        return execute_task(code_str, serialized_code, task_input_data)
-
-
-_global_sandbox_config: Optional[SandboxConfig] = None
-
-
-def set_sandbox_config(config: SandboxConfig):
-    global _global_sandbox_config
-    _global_sandbox_config = config
-    logger.info(f"Sandbox configured: level={config.level.value}, timeout={config.timeout}s")
-
-
-def get_sandbox_config() -> SandboxConfig:
-    global _global_sandbox_config
-    if _global_sandbox_config is None:
-        _global_sandbox_config = SandboxConfig()
-    return _global_sandbox_config
-
-
-def get_sandbox_executor() -> SandboxExecutor:
-    return SandboxExecutor(get_sandbox_config())
