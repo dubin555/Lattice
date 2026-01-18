@@ -31,7 +31,6 @@ class LocalExecutor(ExecutorBackend):
         self._max_workers = max_workers
         self._executor: Optional[ProcessPoolExecutor] = None
         self._futures: Dict[str, Future] = {}
-        self._handle_to_id: Dict[Any, str] = {}
 
     def initialize(self) -> None:
         if self._executor is not None:

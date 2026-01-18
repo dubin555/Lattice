@@ -14,7 +14,6 @@ from lattice.executor.sandbox import (
     get_sandbox_config,
 )
 from lattice.executor.code_executor import (
-    deserialize_function,
     execute_code_string,
     execute_task,
     execute_serialized_with_serialized_args,
