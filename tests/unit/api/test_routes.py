@@ -4,11 +4,20 @@ Unit tests for API routes.
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter, HTTPException
 
 from lattice.api.routes import workflow, langgraph, worker
 from lattice.api.dependencies import set_orchestrator
+from lattice.api.exceptions import handle_route_exceptions
 from lattice.core.workflow.base import Workflow, CodeTask, LangGraphWorkflow, LangGraphTask
+from lattice.exceptions import (
+    WorkflowNotFoundError,
+    TaskNotFoundError,
+    OrchestratorNotInitializedError,
+    ValidationError,
+    CyclicDependencyError,
+    TaskExecutionError,
+)
 
 
 @pytest.fixture
@@ -248,11 +257,123 @@ class TestWorkerRoutes:
 
     def test_get_head_ray_port(self, worker_app, mock_orchestrator):
         mock_orchestrator.ray_head_port = 6379
-        
+
         client = TestClient(worker_app)
         response = client.post("/get_head_ray_port")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
         assert data["port"] == 6379
+
+
+class TestHandleRouteExceptionsDecorator:
+    """Tests for the unified exception handling decorator."""
+
+    @pytest.fixture
+    def exception_test_app(self):
+        """Create a test app with routes that raise different exceptions."""
+        app = FastAPI()
+        router = APIRouter()
+
+        @router.get("/workflow_not_found")
+        @handle_route_exceptions
+        async def raise_workflow_not_found():
+            raise WorkflowNotFoundError("wf-123")
+
+        @router.get("/task_not_found")
+        @handle_route_exceptions
+        async def raise_task_not_found():
+            raise TaskNotFoundError("task-456", "wf-123")
+
+        @router.get("/orchestrator_not_initialized")
+        @handle_route_exceptions
+        async def raise_orchestrator_not_initialized():
+            raise OrchestratorNotInitializedError()
+
+        @router.get("/validation_error")
+        @handle_route_exceptions
+        async def raise_validation_error():
+            raise ValidationError("Invalid input data")
+
+        @router.get("/cyclic_dependency")
+        @handle_route_exceptions
+        async def raise_cyclic_dependency():
+            raise CyclicDependencyError(["a", "b", "a"])
+
+        @router.get("/task_execution_error")
+        @handle_route_exceptions
+        async def raise_task_execution_error():
+            raise TaskExecutionError("task-789", "Connection refused")
+
+        @router.get("/http_exception")
+        @handle_route_exceptions
+        async def raise_http_exception():
+            raise HTTPException(status_code=418, detail="I'm a teapot")
+
+        @router.get("/generic_exception")
+        @handle_route_exceptions
+        async def raise_generic_exception():
+            raise RuntimeError("Something unexpected happened")
+
+        @router.get("/success")
+        @handle_route_exceptions
+        async def success_endpoint():
+            return {"status": "success"}
+
+        app.include_router(router)
+        return app
+
+    def test_workflow_not_found_returns_404(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/workflow_not_found")
+        assert response.status_code == 404
+        assert "wf-123" in response.json()["detail"]
+
+    def test_task_not_found_returns_404(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/task_not_found")
+        assert response.status_code == 404
+        assert "task-456" in response.json()["detail"]
+
+    def test_orchestrator_not_initialized_returns_503(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/orchestrator_not_initialized")
+        assert response.status_code == 503
+        assert "not initialized" in response.json()["detail"]
+
+    def test_validation_error_returns_400(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/validation_error")
+        assert response.status_code == 400
+        assert "Invalid input" in response.json()["detail"]
+
+    def test_cyclic_dependency_returns_400(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/cyclic_dependency")
+        assert response.status_code == 400
+        assert "Cyclic" in response.json()["detail"]
+
+    def test_task_execution_error_returns_500(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/task_execution_error")
+        assert response.status_code == 500
+        assert "task-789" in response.json()["detail"]
+
+    def test_http_exception_preserved(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/http_exception")
+        assert response.status_code == 418
+        assert response.json()["detail"] == "I'm a teapot"
+
+    def test_generic_exception_returns_500(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/generic_exception")
+        assert response.status_code == 500
+        assert "unexpected" in response.json()["detail"]
+
+    def test_success_passthrough(self, exception_test_app):
+        client = TestClient(exception_test_app)
+        response = client.get("/success")
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
