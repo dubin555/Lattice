@@ -15,38 +15,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 
-from lattice.config.defaults import BATCH_DEFAULTS, BatchRule
+from lattice.config.batch import BatchConfig
+from lattice.config.defaults import BatchRule
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class BatchConfig:
-    """Configuration for a batch group."""
-    batch_size: int = BATCH_DEFAULTS.default_batch_size
-    batch_timeout: float = BATCH_DEFAULTS.default_batch_timeout
-
-    def __post_init__(self):
-        if self.batch_size > BATCH_DEFAULTS.max_batch_size:
-            self.batch_size = BATCH_DEFAULTS.max_batch_size
-        if self.batch_timeout > BATCH_DEFAULTS.max_batch_timeout:
-            self.batch_timeout = BATCH_DEFAULTS.max_batch_timeout
-
-    @classmethod
-    def from_rule(cls, rule: BatchRule) -> "BatchConfig":
-        """Create BatchConfig from a BatchRule."""
-        return cls(
-            batch_size=rule.batch_size,
-            batch_timeout=rule.batch_timeout,
-        )
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchConfig":
-        """Create BatchConfig from a dictionary."""
-        return cls(
-            batch_size=data.get("batch_size", BATCH_DEFAULTS.default_batch_size),
-            batch_timeout=data.get("batch_timeout", BATCH_DEFAULTS.default_batch_timeout),
-        )
 
 
 @dataclass

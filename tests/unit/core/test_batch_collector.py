@@ -5,39 +5,59 @@ import time
 import pytest
 from unittest.mock import MagicMock
 
-from lattice.core.scheduler.batch_collector import BatchCollector, BatchConfig, BatchGroup
+from lattice.core.scheduler.batch_collector import BatchCollector, BatchGroup
+from lattice.config.batch import BatchConfig
 from lattice.config.defaults import BatchRule
 
 
 class TestBatchConfig:
     def test_default_values(self):
+        """Test that BatchConfig() uses conservative defaults (disabled)."""
         config = BatchConfig()
+        assert config.enabled == False
+        assert config.batch_size == 1
+        assert config.batch_timeout == 0.0
+
+    def test_with_defaults(self):
+        """Test that with_defaults() uses BATCH_DEFAULTS values."""
+        config = BatchConfig.with_defaults()
+        assert config.enabled == True
         assert config.batch_size == 32
         assert config.batch_timeout == 0.1
 
     def test_custom_values(self):
-        config = BatchConfig(batch_size=64, batch_timeout=0.5)
+        config = BatchConfig(enabled=True, batch_size=64, batch_timeout=0.5)
         assert config.batch_size == 64
         assert config.batch_timeout == 0.5
 
     def test_max_batch_size_limit(self):
-        config = BatchConfig(batch_size=1000)
+        config = BatchConfig(enabled=True, batch_size=1000)
         assert config.batch_size == 256  # max_batch_size
 
     def test_max_batch_timeout_limit(self):
-        config = BatchConfig(batch_timeout=100.0)
+        config = BatchConfig(enabled=True, batch_timeout=100.0)
         assert config.batch_timeout == 5.0  # max_batch_timeout
 
     def test_from_dict(self):
-        data = {"batch_size": 16, "batch_timeout": 0.2}
+        data = {"enabled": True, "batch_size": 16, "batch_timeout": 0.2}
         config = BatchConfig.from_dict(data)
         assert config.batch_size == 16
         assert config.batch_timeout == 0.2
 
     def test_from_dict_missing_values(self):
+        """Test that from_dict with empty dict uses conservative defaults."""
         config = BatchConfig.from_dict({})
-        assert config.batch_size == 32
-        assert config.batch_timeout == 0.1
+        assert config.enabled == False
+        assert config.batch_size == 1
+        assert config.batch_timeout == 0.0
+
+    def test_from_dict_server_side_format(self):
+        """Test that from_dict with batch_size/timeout implies enabled."""
+        data = {"batch_size": 16, "batch_timeout": 0.2}
+        config = BatchConfig.from_dict(data)
+        assert config.enabled == True
+        assert config.batch_size == 16
+        assert config.batch_timeout == 0.2
 
     def test_from_rule(self):
         rule = BatchRule(
@@ -53,7 +73,7 @@ class TestBatchConfig:
 
 class TestBatchGroup:
     def test_add_task(self):
-        config = BatchConfig(batch_size=3)
+        config = BatchConfig(enabled=True, batch_size=3)
         group = BatchGroup(config=config)
 
         group.add_task("task1")
@@ -61,7 +81,7 @@ class TestBatchGroup:
         assert group.first_task_time is not None
 
     def test_is_ready_by_size(self):
-        config = BatchConfig(batch_size=3, batch_timeout=0)
+        config = BatchConfig(enabled=True, batch_size=3, batch_timeout=0)
         group = BatchGroup(config=config)
 
         group.add_task("task1")
@@ -72,7 +92,7 @@ class TestBatchGroup:
         assert group.is_ready()
 
     def test_is_ready_by_timeout(self):
-        config = BatchConfig(batch_size=100, batch_timeout=0.05)
+        config = BatchConfig(enabled=True, batch_size=100, batch_timeout=0.05)
         group = BatchGroup(config=config)
 
         group.add_task("task1")
@@ -82,12 +102,12 @@ class TestBatchGroup:
         assert group.is_ready()
 
     def test_is_ready_empty(self):
-        config = BatchConfig(batch_size=3)
+        config = BatchConfig(enabled=True, batch_size=3)
         group = BatchGroup(config=config)
         assert not group.is_ready()
 
     def test_clear(self):
-        config = BatchConfig(batch_size=10)
+        config = BatchConfig(enabled=True, batch_size=10)
         group = BatchGroup(config=config)
 
         group.add_task("task1")
@@ -134,14 +154,14 @@ class TestBatchRule:
 class TestBatchCollector:
     def test_add_task_creates_group(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=3)
+        config = BatchConfig(enabled=True, batch_size=3)
 
         collector.add_task("task_a", "task1", config)
         assert collector.pending_count("task_a") == 1
 
     def test_add_task_same_group(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=3)
+        config = BatchConfig(enabled=True, batch_size=3)
 
         collector.add_task("task_a", "task1", config)
         collector.add_task("task_a", "task2", config)
@@ -149,7 +169,7 @@ class TestBatchCollector:
 
     def test_add_task_different_groups(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=3)
+        config = BatchConfig(enabled=True, batch_size=3)
 
         collector.add_task("task_a", "task1", config)
         collector.add_task("task_b", "task2", config)
@@ -159,7 +179,7 @@ class TestBatchCollector:
 
     def test_get_ready_batches_by_size(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=2, batch_timeout=0)
+        config = BatchConfig(enabled=True, batch_size=2, batch_timeout=0)
 
         collector.add_task("task_a", "task1", config)
         assert collector.get_ready_batches() == {}
@@ -172,7 +192,7 @@ class TestBatchCollector:
 
     def test_get_ready_batches_by_timeout(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=100, batch_timeout=0.05)
+        config = BatchConfig(enabled=True, batch_size=100, batch_timeout=0.05)
 
         collector.add_task("task_a", "task1", config)
         assert collector.get_ready_batches() == {}
@@ -245,7 +265,7 @@ class TestBatchCollector:
 
     def test_force_flush(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=100)
+        config = BatchConfig(enabled=True, batch_size=100)
 
         collector.add_task("task_a", "task1", config)
         collector.add_task("task_a", "task2", config)
@@ -260,7 +280,7 @@ class TestBatchCollector:
 
     def test_force_flush_specific_group(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=100)
+        config = BatchConfig(enabled=True, batch_size=100)
 
         collector.add_task("task_a", "task1", config)
         collector.add_task("task_b", "task2", config)
@@ -272,7 +292,7 @@ class TestBatchCollector:
 
     def test_clear(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=100)
+        config = BatchConfig(enabled=True, batch_size=100)
 
         collector.add_task("task_a", "task1", config)
         collector.add_task("task_b", "task2", config)
@@ -291,7 +311,7 @@ class TestBatchCollector:
 
     def test_get_batch_for_group(self):
         collector = BatchCollector()
-        config = BatchConfig(batch_size=2)
+        config = BatchConfig(enabled=True, batch_size=2)
 
         collector.add_task("task_a", "task1", config)
         assert collector.get_batch_for_group("task_a") is None

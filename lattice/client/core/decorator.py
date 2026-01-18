@@ -8,30 +8,8 @@ from typing import Callable, Dict, List, Any, Optional
 
 import cloudpickle
 
+from lattice.config.batch import BatchConfig
 from lattice.config.defaults import get_default_resources
-
-
-@dataclass
-class BatchConfig:
-    """Configuration for task batching."""
-    enabled: bool = False
-    batch_size: int = 1
-    batch_timeout: float = 0.0  # seconds, 0 means no timeout
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "batch_size": self.batch_size,
-            "batch_timeout": self.batch_timeout,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchConfig":
-        return cls(
-            enabled=data.get("enabled", False),
-            batch_size=data.get("batch_size", 1),
-            batch_timeout=data.get("batch_timeout", 0.0),
-        )
 
 
 @dataclass

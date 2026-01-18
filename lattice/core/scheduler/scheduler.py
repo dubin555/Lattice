@@ -22,7 +22,8 @@ from typing import Dict, Any, List, Optional
 import cloudpickle
 
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
-from lattice.core.scheduler.batch_collector import BatchCollector, BatchConfig
+from lattice.core.scheduler.batch_collector import BatchCollector
+from lattice.config.batch import BatchConfig
 from lattice.core.resource.manager import ResourceManager, TaskResourceRequirements
 from lattice.core.resource.node import SelectedNode
 from lattice.core.runtime.task import (

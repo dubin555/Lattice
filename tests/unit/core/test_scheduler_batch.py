@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 
 from lattice.core.scheduler.scheduler import Scheduler, _run_batch_task
 from lattice.core.scheduler.message_bus import MessageBus, Message, MessageType
-from lattice.core.scheduler.batch_collector import BatchConfig
+from lattice.config.batch import BatchConfig
 from lattice.core.runtime.task import CodeTaskRuntime
 from lattice.executor.base import ExecutorType
 from lattice.config.defaults import BatchRule
