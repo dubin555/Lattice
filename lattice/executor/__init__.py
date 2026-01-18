@@ -31,6 +31,21 @@ def __getattr__(name):
     if name in ("SandboxLevel", "SandboxConfig", "SandboxExecutor"):
         from lattice.executor.sandbox import SandboxLevel, SandboxConfig, SandboxExecutor
         return locals()[name]
+    if name in (
+        "deserialize_function",
+        "execute_serialized",
+        "execute_serialized_with_serialized_args",
+        "execute_code_string",
+        "execute_task",
+    ):
+        from lattice.executor.code_executor import (
+            deserialize_function,
+            execute_serialized,
+            execute_serialized_with_serialized_args,
+            execute_code_string,
+            execute_task,
+        )
+        return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -51,4 +66,10 @@ __all__ = [
     "SandboxLevel",
     "SandboxConfig",
     "SandboxExecutor",
+    # Code executor utilities
+    "deserialize_function",
+    "execute_serialized",
+    "execute_serialized_with_serialized_args",
+    "execute_code_string",
+    "execute_task",
 ]

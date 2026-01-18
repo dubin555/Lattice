@@ -1,12 +1,10 @@
 """
 Task execution runner for distributed task execution.
 """
-import base64
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-import cloudpickle
 import ray
 
 from lattice.executor.sandbox import (
@@ -15,27 +13,14 @@ from lattice.executor.sandbox import (
     SandboxLevel,
     get_sandbox_config,
 )
+from lattice.executor.code_executor import (
+    deserialize_function,
+    execute_code_string,
+    execute_task,
+    execute_serialized_with_serialized_args,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def execute_code_string(code_str: str, task_input_data: Dict[str, Any]) -> Any:
-    import ast
-    tree = ast.parse(code_str)
-    func_node = None
-    import_nodes = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            func_node = node
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            import_nodes.append(node)
-    if func_node is None:
-        raise ValueError("No function definition found in code")
-    namespace: Dict[str, Any] = {}
-    for imp in import_nodes:
-        exec(compile(ast.Module(body=[imp], type_ignores=[]), '<string>', 'exec'), namespace)
-    exec(compile(ast.Module(body=[func_node], type_ignores=[]), '<string>', 'exec'), namespace)
-    return namespace[func_node.name](task_input_data)
 
 
 @ray.remote(max_retries=0)
@@ -54,12 +39,7 @@ def execute_code_task(
     if config.level != SandboxLevel.NONE:
         return SandboxExecutor(config).execute(code_str, serialized_code, task_input_data)
 
-    task_input_data = task_input_data or {}
-    if serialized_code is not None:
-        return cloudpickle.loads(base64.b64decode(serialized_code))(task_input_data)
-    elif code_str is not None:
-        return execute_code_string(code_str, task_input_data)
-    raise ValueError("Either code_str or serialized_code must be provided")
+    return execute_task(code_str, serialized_code, task_input_data)
 
 
 @ray.remote(max_retries=0)
@@ -71,10 +51,9 @@ def execute_langgraph_task(
 ) -> Any:
     if cuda_visible_devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
-    func = cloudpickle.loads(base64.b64decode(serialized_code))
-    args = cloudpickle.loads(base64.b64decode(serialized_args))
-    kwargs = cloudpickle.loads(base64.b64decode(serialized_kwargs))
-    return func(*args, **kwargs)
+    return execute_serialized_with_serialized_args(
+        serialized_code, serialized_args, serialized_kwargs
+    )
 
 
 class CodeRunner:

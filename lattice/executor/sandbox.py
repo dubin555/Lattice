@@ -5,6 +5,13 @@ Provides multiple isolation levels:
 - NONE: Direct execution (fastest, no isolation)
 - SUBPROCESS: Run in separate process with resource limits
 - DOCKER: Run in Docker container (strongest isolation)
+
+Note: The embedded runner scripts (RUNNER_TEMPLATE, DOCKER_RUNNER_SCRIPT) contain
+execute_code logic that is derived from the utilities in code_executor.py.
+These scripts must remain self-contained since they run in isolated environments
+(subprocesses or Docker containers) without access to the main Lattice codebase.
+Any changes to the core execution logic in code_executor.py should be reflected
+in these embedded scripts to maintain consistency.
 """
 import os
 import sys
@@ -54,6 +61,9 @@ class ResourceLimitError(SandboxError):
     pass
 
 
+# RUNNER_TEMPLATE: Self-contained Python script for subprocess execution.
+# The execute_code function below is derived from lattice.executor.code_executor
+# but must be embedded here since subprocesses don't have access to the Lattice package.
 RUNNER_TEMPLATE = '''
 import sys
 import json
@@ -300,6 +310,9 @@ class SubprocessSandbox:
                 pass
 
 
+# DOCKER_RUNNER_SCRIPT: Self-contained Python script for Docker container execution.
+# The execute_code function below is derived from lattice.executor.code_executor
+# but must be embedded here since Docker containers don't have access to the Lattice package.
 DOCKER_RUNNER_SCRIPT = '''
 import sys
 import json
@@ -440,28 +453,12 @@ class SandboxExecutor:
         serialized_code: Optional[str],
         task_input_data: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        import cloudpickle
-        import ast
-        task_input_data = task_input_data or {}
-        if serialized_code:
-            return cloudpickle.loads(base64.b64decode(serialized_code))(task_input_data)
-        elif code_str:
-            tree = ast.parse(code_str)
-            func_node = None
-            import_nodes = []
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    func_node = node
-                elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                    import_nodes.append(node)
-            if func_node is None:
-                raise ValueError("No function definition found")
-            namespace = {}
-            for imp in import_nodes:
-                exec(compile(ast.Module(body=[imp], type_ignores=[]), '<string>', 'exec'), namespace)
-            exec(compile(ast.Module(body=[func_node], type_ignores=[]), '<string>', 'exec'), namespace)
-            return namespace[func_node.name](task_input_data)
-        raise ValueError("No code provided")
+        """Execute task directly without sandbox isolation.
+
+        Uses the unified code execution utilities from code_executor.
+        """
+        from lattice.executor.code_executor import execute_task
+        return execute_task(code_str, serialized_code, task_input_data)
 
 
 _global_sandbox_config: Optional[SandboxConfig] = None

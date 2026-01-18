@@ -55,8 +55,8 @@ def my_task(params):
     def test_direct_execution_no_code_raises(self):
         config = SandboxConfig(level=SandboxLevel.NONE)
         executor = SandboxExecutor(config)
-        
-        with pytest.raises(ValueError, match="No code provided"):
+
+        with pytest.raises(ValueError, match="Either code_str or serialized_code must be provided"):
             executor.execute()
 
 

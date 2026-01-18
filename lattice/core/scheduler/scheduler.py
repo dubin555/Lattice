@@ -4,22 +4,19 @@ Runs as a background thread with pluggable executor backends.
 
 Architecture:
   Orchestrator (main thread)
-       │
-       │ MessageBus (queue.Queue)
-       ▼
+       |
+       | MessageBus (queue.Queue)
+       v
   Scheduler (background thread)
-       │
-       │ ExecutorBackend (Ray / Local / ...)
-       ▼
+       |
+       | ExecutorBackend (Ray / Local / ...)
+       v
   Workers (execute tasks)
 """
-import base64
 import logging
 import threading
 import time
 from typing import Dict, Any, List, Optional
-
-import cloudpickle
 
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
 from lattice.core.scheduler.batch_collector import BatchCollector
@@ -44,6 +41,11 @@ from lattice.executor.base import (
 )
 from lattice.config.defaults import BatchRule
 from lattice.executor.factory import create_executor
+from lattice.executor.code_executor import (
+    execute_serialized_with_serialized_args,
+    execute_task,
+    execute_code_string,
+)
 
 # Import metrics - optional dependency
 try:
@@ -64,21 +66,21 @@ LOOP_INTERVAL = 0.05
 
 
 def _deserialize_and_call(serialized_code: str, serialized_args: str, serialized_kwargs: str):
-    func = cloudpickle.loads(base64.b64decode(serialized_code))
-    args = cloudpickle.loads(base64.b64decode(serialized_args))
-    kwargs = cloudpickle.loads(base64.b64decode(serialized_kwargs))
-    return func(*args, **kwargs)
+    """Deserialize and call a function with serialized arguments.
+
+    Uses the unified code execution utilities from code_executor.
+    """
+    return execute_serialized_with_serialized_args(
+        serialized_code, serialized_args, serialized_kwargs
+    )
 
 
 def _run_code_task(code_str: Optional[str], serialized_code: Optional[str], task_input_data: Dict[str, Any]):
-    if serialized_code is not None:
-        func = cloudpickle.loads(base64.b64decode(serialized_code))
-        return func(task_input_data)
-    elif code_str is not None:
-        from lattice.executor.runner import CodeRunner
-        return CodeRunner(code_str, task_input_data).run()
-    else:
-        raise ValueError("Either code_str or serialized_code must be provided")
+    """Execute a code task using either serialized code or code string.
+
+    Uses the unified code execution utilities from code_executor.
+    """
+    return execute_task(code_str, serialized_code, task_input_data)
 
 
 def _run_batch_task(
@@ -91,16 +93,19 @@ def _run_batch_task(
     The task function is expected to handle batched inputs if it's marked
     as batchable. The function receives a list of input dicts and should
     return a list of results (one per input).
+
+    Uses the unified code execution utilities from code_executor.
     """
+    from lattice.executor.code_executor import deserialize_function
+
     if serialized_code is not None:
-        func = cloudpickle.loads(base64.b64decode(serialized_code))
+        func = deserialize_function(serialized_code)
     elif code_str is not None:
-        from lattice.executor.runner import CodeRunner
         # For code string, we need to execute each input separately
-        # as CodeRunner doesn't support batch execution
+        # as code string execution doesn't support batch execution
         results = []
         for input_data in batched_inputs:
-            result = CodeRunner(code_str, input_data).run()
+            result = execute_code_string(code_str, input_data)
             results.append(result)
         return results
     else:
