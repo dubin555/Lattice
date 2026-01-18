@@ -11,21 +11,9 @@ from lattice.api.models.schemas import (
     RunLangGraphTaskResponse,
 )
 from lattice.core.workflow.base import LangGraphTask, LangGraphWorkflow
+from lattice.api.dependencies import get_orchestrator
 
 router = APIRouter(tags=["langgraph"])
-
-_orchestrator = None
-
-
-def set_orchestrator(orchestrator):
-    global _orchestrator
-    _orchestrator = orchestrator
-
-
-def get_orchestrator():
-    if _orchestrator is None:
-        raise RuntimeError("Orchestrator not initialized")
-    return _orchestrator
 
 
 @router.post("/add_langgraph_task", response_model=AddTaskResponse)

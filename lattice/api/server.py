@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from lattice.core.orchestrator import Orchestrator
 from lattice.api.routes import workflow, langgraph, worker
+from lattice.api.dependencies import set_orchestrator
 
 # Import metrics - optional dependency
 try:
@@ -100,9 +101,7 @@ def create_app(
     OrchestratorManager.initialize(ray_head_port)
     orchestrator = OrchestratorManager.get()
 
-    workflow.set_orchestrator(orchestrator)
-    langgraph.set_orchestrator(orchestrator)
-    worker.set_orchestrator(orchestrator)
+    set_orchestrator(orchestrator)
 
     app.include_router(workflow.router)
     app.include_router(langgraph.router)

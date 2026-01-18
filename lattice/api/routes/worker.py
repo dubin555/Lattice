@@ -8,21 +8,9 @@ from lattice.api.models.schemas import (
     StartWorkerResponse,
     GetRayPortResponse,
 )
+from lattice.api.dependencies import get_orchestrator
 
 router = APIRouter(tags=["worker"])
-
-_orchestrator = None
-
-
-def set_orchestrator(orchestrator):
-    global _orchestrator
-    _orchestrator = orchestrator
-
-
-def get_orchestrator():
-    if _orchestrator is None:
-        raise RuntimeError("Orchestrator not initialized")
-    return _orchestrator
 
 
 @router.post("/start_worker", response_model=StartWorkerResponse)

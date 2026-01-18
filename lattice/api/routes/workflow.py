@@ -18,22 +18,9 @@ from lattice.api.models.schemas import (
 )
 from lattice.core.workflow.base import CodeTask, TaskType
 from lattice.exceptions import WorkflowNotFoundError, TaskNotFoundError
+from lattice.api.dependencies import get_orchestrator
 
 router = APIRouter(tags=["workflow"])
-
-_orchestrator = None
-
-
-def set_orchestrator(orchestrator):
-    global _orchestrator
-    _orchestrator = orchestrator
-
-
-def get_orchestrator():
-    if _orchestrator is None:
-        from lattice.exceptions import OrchestratorNotInitializedError
-        raise OrchestratorNotInitializedError()
-    return _orchestrator
 
 
 @router.post("/create_workflow", response_model=CreateWorkflowResponse)

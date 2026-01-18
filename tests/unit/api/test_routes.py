@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
 from lattice.api.routes import workflow, langgraph, worker
+from lattice.api.dependencies import set_orchestrator
 from lattice.core.workflow.base import Workflow, CodeTask, LangGraphWorkflow, LangGraphTask
 
 
@@ -20,7 +21,7 @@ def mock_orchestrator():
 @pytest.fixture
 def workflow_app(mock_orchestrator):
     app = FastAPI()
-    workflow.set_orchestrator(mock_orchestrator)
+    set_orchestrator(mock_orchestrator)
     app.include_router(workflow.router)
     return app
 
@@ -28,7 +29,7 @@ def workflow_app(mock_orchestrator):
 @pytest.fixture
 def langgraph_app(mock_orchestrator):
     app = FastAPI()
-    langgraph.set_orchestrator(mock_orchestrator)
+    set_orchestrator(mock_orchestrator)
     app.include_router(langgraph.router)
     return app
 
@@ -36,7 +37,7 @@ def langgraph_app(mock_orchestrator):
 @pytest.fixture
 def worker_app(mock_orchestrator):
     app = FastAPI()
-    worker.set_orchestrator(mock_orchestrator)
+    set_orchestrator(mock_orchestrator)
     app.include_router(worker.router)
     return app
 
