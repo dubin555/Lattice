@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
-class SandboxLevel(Enum):
+class SandboxLevel(str, Enum):
+    """Sandbox isolation levels."""
     NONE = "none"
     SUBPROCESS = "subprocess"
     SECCOMP = "seccomp"

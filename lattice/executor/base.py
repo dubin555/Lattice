@@ -14,7 +14,8 @@ from lattice.exceptions import (
 )
 
 
-class ExecutorType(Enum):
+class ExecutorType(str, Enum):
+    """Executor backend types."""
     RAY = "ray"
     LOCAL = "local"
 

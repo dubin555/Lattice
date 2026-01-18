@@ -28,6 +28,9 @@ def __getattr__(name):
     if name == "LocalExecutor":
         from lattice.executor.local_executor import LocalExecutor
         return LocalExecutor
+    if name in ("SandboxLevel", "SandboxConfig", "SandboxExecutor"):
+        from lattice.executor.sandbox import SandboxLevel, SandboxConfig, SandboxExecutor
+        return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -45,4 +48,7 @@ __all__ = [
     "execute_langgraph_task",
     "CodeRunner",
     "TaskExecutor",
+    "SandboxLevel",
+    "SandboxConfig",
+    "SandboxExecutor",
 ]

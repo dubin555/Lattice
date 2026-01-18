@@ -8,19 +8,9 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 from enum import Enum
 
-
-class ExecutorType(str, Enum):
-    """Executor backend types."""
-    RAY = "ray"
-    LOCAL = "local"
-
-
-class SandboxLevel(str, Enum):
-    """Sandbox isolation levels."""
-    NONE = "none"
-    SUBPROCESS = "subprocess"
-    SECCOMP = "seccomp"
-    DOCKER = "docker"
+# Import enums from their canonical locations
+from lattice.executor.base import ExecutorType
+from lattice.executor.sandbox import SandboxLevel
 
 
 @dataclass(frozen=True)
