@@ -1,6 +1,7 @@
 """
 Lattice client module.
 """
+from lattice.client.base import BaseClient
 from lattice.client.core import (
     LatticeClient,
     LatticeWorkflow,
@@ -12,8 +13,10 @@ from lattice.client.core import (
     TaskMetadata,
 )
 from lattice.client.langgraph import LangGraphClient
+from lattice.exceptions import LatticeClientError
 
 __all__ = [
+    "BaseClient",
     "LatticeClient",
     "LatticeWorkflow",
     "LatticeTask",
@@ -23,4 +26,5 @@ __all__ = [
     "get_task_metadata",
     "TaskMetadata",
     "LangGraphClient",
+    "LatticeClientError",
 ]

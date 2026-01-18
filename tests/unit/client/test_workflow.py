@@ -6,21 +6,31 @@ from unittest.mock import MagicMock, patch
 from lattice.client.core.workflow import LatticeWorkflow
 from lattice.client.core.models import TaskOutput, LatticeTask
 from lattice.client.core.decorator import task
+from lattice.client.base import BaseClient
 
 
 class TestLatticeWorkflow:
     def test_creation(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
+        # Test backward compatibility with server_url string
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
         assert wf.workflow_id == "wf-1"
         assert wf.server_url == "http://localhost:8000"
         assert len(wf._tasks) == 0
 
+    def test_creation_with_client(self):
+        # Test new style with BaseClient instance
+        client = BaseClient(server_url="http://localhost:8000")
+        wf = LatticeWorkflow(workflow_id="wf-1", client=client)
+        assert wf.workflow_id == "wf-1"
+        assert wf.server_url == "http://localhost:8000"
+        assert wf._client is client
+
     def test_server_url_trailing_slash_stripped(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000/")
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000/")
         assert wf.server_url == "http://localhost:8000"
 
     def test_repr(self):
-        wf = LatticeWorkflow(workflow_id="12345678-abcd-efgh", server_url="http://localhost:8000")
+        wf = LatticeWorkflow(workflow_id="12345678-abcd-efgh", client="http://localhost:8000")
         repr_str = repr(wf)
         assert "LatticeWorkflow" in repr_str
         assert "12345678" in repr_str
@@ -28,15 +38,15 @@ class TestLatticeWorkflow:
 
 class TestBuildTaskInput:
     def test_from_user_input(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         metadata = MagicMock()
         metadata.inputs = ["x", "y"]
         metadata.data_types = {"x": "str", "y": "int"}
-        
+
         inputs = {"x": "hello", "y": 42}
         result = wf._build_task_input(inputs, metadata)
-        
+
         assert "input_params" in result
         params = result["input_params"]
         assert params["1"]["key"] == "x"
@@ -46,43 +56,43 @@ class TestBuildTaskInput:
         assert params["2"]["value"] == 42
 
     def test_from_task_input(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         metadata = MagicMock()
         metadata.inputs = ["data"]
         metadata.data_types = {"data": "str"}
-        
+
         task_output = TaskOutput(task_id="prev-task", output_key="result")
         inputs = {"data": task_output}
         result = wf._build_task_input(inputs, metadata)
-        
+
         params = result["input_params"]
         assert params["1"]["input_schema"] == "from_task"
         assert params["1"]["value"] == "prev-task.output.result"
 
     def test_missing_input_uses_empty_string(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         metadata = MagicMock()
         metadata.inputs = ["missing"]
         metadata.data_types = {"missing": "str"}
-        
+
         result = wf._build_task_input({}, metadata)
-        
+
         params = result["input_params"]
         assert params["1"]["value"] == ""
 
 
 class TestBuildTaskOutput:
     def test_basic_output(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         metadata = MagicMock()
         metadata.outputs = ["result", "status"]
         metadata.data_types = {"result": "str", "status": "bool"}
-        
+
         result = wf._build_task_output(metadata)
-        
+
         assert "output_params" in result
         params = result["output_params"]
         assert params["1"]["key"] == "result"
@@ -92,84 +102,84 @@ class TestBuildTaskOutput:
 
 
 class TestAddTaskWithMock:
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_add_task_makes_requests(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success", "task_id": "task-123"}
         mock_requests.post.return_value = mock_response
-        
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         @task(inputs=["x"], outputs=["y"])
         def sample_task(params):
             return {"y": params["x"]}
-        
+
         result = wf.add_task(task_func=sample_task, inputs={"x": "test"})
-        
+
         assert isinstance(result, LatticeTask)
         assert result.task_id == "task-123"
         assert mock_requests.post.call_count == 2
 
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_add_task_no_func_raises(self, mock_requests):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         with pytest.raises(ValueError, match="task_func is required"):
             wf.add_task(task_func=None)
 
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_add_task_failed_response_raises(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
         mock_requests.post.return_value = mock_response
-        
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
+
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
         @task(inputs=["x"], outputs=["y"])
         def failing_task(params):
             return {"y": params["x"]}
-        
-        with pytest.raises(Exception, match="Failed to add task"):
+
+        with pytest.raises(Exception, match="Request to /add_task failed"):
             wf.add_task(task_func=failing_task)
 
 
 class TestRunWorkflow:
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_run_returns_run_id(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success", "run_id": "run-456"}
         mock_requests.post.return_value = mock_response
-        
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
+
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
         run_id = wf.run()
-        
+
         assert run_id == "run-456"
 
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_run_failed_raises(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Error"
         mock_requests.post.return_value = mock_response
-        
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
-        
-        with pytest.raises(Exception, match="Failed to run workflow"):
+
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
+
+        with pytest.raises(Exception, match="Request to /run_workflow failed"):
             wf.run()
 
 
 class TestAddEdge:
-    @patch("lattice.client.core.workflow.requests")
+    @patch("lattice.client.base.requests")
     def test_add_edge_makes_request(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success"}
         mock_requests.post.return_value = mock_response
-        
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
+
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
         source = LatticeTask(
             task_id="task-1",
             workflow_id="wf-1",
@@ -182,9 +192,9 @@ class TestAddEdge:
             server_url="http://localhost:8000",
             task_name="Target",
         )
-        
+
         wf.add_edge(source, target)
-        
+
         mock_requests.post.assert_called_once()
         call_args = mock_requests.post.call_args
         assert "add_edge" in call_args[0][0]
@@ -192,10 +202,10 @@ class TestAddEdge:
 
 class TestResultsCache:
     def test_cached_results_returned(self):
-        wf = LatticeWorkflow(workflow_id="wf-1", server_url="http://localhost:8000")
+        wf = LatticeWorkflow(workflow_id="wf-1", client="http://localhost:8000")
         cached_data = [{"type": "finish_task", "data": {"result": "cached"}}]
         wf._results_cache["run-123"] = cached_data
-        
+
         result = wf.get_results("run-123", verbose=False)
-        
+
         assert result == cached_data

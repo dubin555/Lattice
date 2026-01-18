@@ -23,6 +23,15 @@ class ClientError(LatticeError):
     pass
 
 
+class LatticeClientError(ClientError):
+    """Exception raised when a client HTTP request fails."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, details)
+        self.status_code = details.get("status_code") if details else None
+        self.response_text = details.get("response_text") if details else None
+
+
 class ServerError(LatticeError):
     """Base exception for server-side errors."""
     pass

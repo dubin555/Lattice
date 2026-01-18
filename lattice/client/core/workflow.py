@@ -3,19 +3,46 @@ Lattice workflow client for building and executing workflows.
 """
 import json
 import threading
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, List, Any, Optional, Callable, Union, TYPE_CHECKING
 
-import requests
 import websocket
 
 from lattice.client.core.models import LatticeTask, TaskOutput
 from lattice.client.core.decorator import get_task_metadata
 
+if TYPE_CHECKING:
+    from lattice.client.base import BaseClient
+
 
 class LatticeWorkflow:
-    def __init__(self, workflow_id: str, server_url: str):
+    """
+    Workflow builder and executor.
+
+    Uses a BaseClient instance for HTTP requests to ensure consistent
+    error handling across all client operations.
+    """
+
+    def __init__(self, workflow_id: str, client: Union["BaseClient", str]):
+        """
+        Initialize the workflow.
+
+        Args:
+            workflow_id: The ID of the workflow.
+            client: Either a BaseClient instance or a server URL string
+                   (for backward compatibility).
+        """
         self.workflow_id = workflow_id
-        self.server_url = server_url.rstrip("/")
+
+        # Support both new (client instance) and old (server_url string) signatures
+        if isinstance(client, str):
+            # Backward compatibility: create a minimal client-like object
+            from lattice.client.base import BaseClient
+            self._client = BaseClient(client)
+            self.server_url = client.rstrip("/")
+        else:
+            self._client = client
+            self.server_url = client.server_url
+
         self._tasks: Dict[str, LatticeTask] = {}
         self._nodes: Dict[str, Dict[str, Any]] = {}
         self._edges: List[tuple] = []
@@ -29,33 +56,31 @@ class LatticeWorkflow:
     ) -> LatticeTask:
         if task_func is None:
             raise ValueError("task_func is required")
-        
+
         metadata = get_task_metadata(task_func)
-        
+
         if task_name is None:
             task_name = metadata.func_name
-        
-        url = f"{self.server_url}/add_task"
+
         data = {
             "workflow_id": self.workflow_id,
             "task_type": "code",
             "task_name": task_name,
         }
-        
-        response = requests.post(url, json=data)
-        if response.status_code != 200:
-            raise Exception(f"Failed to add task: {response.text}")
-        
-        result = response.json()
+
+        result = self._client._post("/add_task", data)
         if result.get("status") != "success":
-            raise Exception(f"Failed to add task: {result}")
-        
+            from lattice.exceptions import LatticeClientError
+            raise LatticeClientError(
+                f"Failed to add task: {result}",
+                details={"response": result}
+            )
+
         task_id = result["task_id"]
-        
+
         task_input = self._build_task_input(inputs or {}, metadata)
         task_output = self._build_task_output(metadata)
-        
-        save_url = f"{self.server_url}/save_task_and_add_edge"
+
         save_data = {
             "workflow_id": self.workflow_id,
             "task_id": task_id,
@@ -67,10 +92,8 @@ class LatticeWorkflow:
             "resources": metadata.resources,
             "batch_config": metadata.batch_config.to_dict() if metadata.batch_config else None,
         }
-        
-        save_response = requests.post(save_url, json=save_data)
-        if save_response.status_code != 200:
-            raise Exception(f"Failed to save task: {save_response.text}")
+
+        self._client._post("/save_task_and_add_edge", save_data)
         
         task = LatticeTask(
             task_id=task_id,
@@ -132,29 +155,25 @@ class LatticeWorkflow:
         return task_output
 
     def add_edge(self, source_task: LatticeTask, target_task: LatticeTask) -> None:
-        url = f"{self.server_url}/add_edge"
         data = {
             "workflow_id": self.workflow_id,
             "source_task_id": source_task.task_id,
             "target_task_id": target_task.task_id,
         }
-        
-        response = requests.post(url, json=data)
-        if response.status_code != 200:
-            raise Exception(f"Failed to add edge: {response.text}")
+
+        self._client._post("/add_edge", data)
 
     def run(self) -> str:
-        url = f"{self.server_url}/run_workflow"
         data = {"workflow_id": self.workflow_id}
-        
-        response = requests.post(url, json=data)
-        if response.status_code != 200:
-            raise Exception(f"Failed to run workflow: {response.text}")
-        
-        result = response.json()
+
+        result = self._client._post("/run_workflow", data)
         if result.get("status") != "success":
-            raise Exception(f"Failed to run workflow: {result}")
-        
+            from lattice.exceptions import LatticeClientError
+            raise LatticeClientError(
+                f"Failed to run workflow: {result}",
+                details={"response": result}
+            )
+
         return result.get("run_id")
 
     def get_results(self, run_id: str, verbose: bool = True) -> List[Dict[str, Any]]:

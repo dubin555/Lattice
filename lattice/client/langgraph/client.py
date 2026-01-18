@@ -6,25 +6,29 @@ import functools
 from typing import Any, Callable, Dict, Optional
 
 import cloudpickle
-import requests
+
+from lattice.client.base import BaseClient
 
 
-class LangGraphClient:
+class LangGraphClient(BaseClient):
+    """
+    Client for running LangGraph workflows on Lattice.
+
+    Inherits from BaseClient to provide common HTTP request functionality.
+    """
+
     def __init__(self, server_url: str = "http://localhost:8000"):
-        self.server_url = server_url.rstrip("/")
+        """
+        Initialize the LangGraph client.
+
+        Args:
+            server_url: The URL of the Lattice server.
+        """
+        super().__init__(server_url)
         self._default_resources = {"cpu": 1, "gpu": 0, "cpu_mem": 0, "gpu_mem": 0}
-        
+
         response = self._post("/create_workflow")
         self.workflow_id = response["workflow_id"]
-
-    def _post(self, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        url = f"{self.server_url}{endpoint}"
-        response = requests.post(url, json=data or {})
-        
-        if response.status_code != 200:
-            raise Exception(f"Request failed: {response.status_code}, {response.text}")
-        
-        return response.json()
 
     def task(self, func_or_resources=None, *, resources: Optional[Dict[str, Any]] = None):
         if callable(func_or_resources):

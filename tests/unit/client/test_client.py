@@ -22,7 +22,7 @@ class TestLatticeClient:
 
 
 class TestCreateWorkflow:
-    @patch("lattice.client.core.client.requests")
+    @patch("lattice.client.base.requests")
     def test_create_workflow_success(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -31,35 +31,35 @@ class TestCreateWorkflow:
             "workflow_id": "wf-123",
         }
         mock_requests.post.return_value = mock_response
-        
+
         client = LatticeClient(server_url="http://localhost:8000")
         workflow = client.create_workflow()
-        
+
         assert isinstance(workflow, LatticeWorkflow)
         assert workflow.workflow_id == "wf-123"
 
-    @patch("lattice.client.core.client.requests")
+    @patch("lattice.client.base.requests")
     def test_create_workflow_failed_status(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "error", "message": "Failed"}
         mock_requests.post.return_value = mock_response
-        
+
         client = LatticeClient(server_url="http://localhost:8000")
-        
+
         with pytest.raises(Exception, match="Failed to create workflow"):
             client.create_workflow()
 
-    @patch("lattice.client.core.client.requests")
+    @patch("lattice.client.base.requests")
     def test_create_workflow_http_error(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
         mock_requests.post.return_value = mock_response
-        
+
         client = LatticeClient(server_url="http://localhost:8000")
-        
-        with pytest.raises(Exception, match="Failed to create workflow"):
+
+        with pytest.raises(Exception, match="Request to /create_workflow failed"):
             client.create_workflow()
 
 
@@ -67,32 +67,32 @@ class TestGetWorkflow:
     def test_get_workflow_returns_lattice_workflow(self):
         client = LatticeClient(server_url="http://localhost:8000")
         workflow = client.get_workflow("existing-wf-id")
-        
+
         assert isinstance(workflow, LatticeWorkflow)
         assert workflow.workflow_id == "existing-wf-id"
 
 
 class TestGetRayHeadPort:
-    @patch("lattice.client.core.client.requests")
+    @patch("lattice.client.base.requests")
     def test_get_ray_head_port_success(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"port": 6379}
         mock_requests.post.return_value = mock_response
-        
+
         client = LatticeClient(server_url="http://localhost:8000")
         port = client.get_ray_head_port()
-        
+
         assert port == 6379
 
-    @patch("lattice.client.core.client.requests")
+    @patch("lattice.client.base.requests")
     def test_get_ray_head_port_failed(self, mock_requests):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Error"
         mock_requests.post.return_value = mock_response
-        
+
         client = LatticeClient(server_url="http://localhost:8000")
-        
-        with pytest.raises(Exception, match="Failed to get Ray port"):
+
+        with pytest.raises(Exception, match="Request to /get_head_ray_port failed"):
             client.get_ray_head_port()
