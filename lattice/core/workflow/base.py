@@ -74,7 +74,7 @@ class CodeTask(BaseTask):
             "task_output": self.task_output,
             "resources": self.resources,
             "code_str": self.code_str,
-            "code_ser": self.serialized_code,
+            "serialized_code": self.serialized_code,
             "batch_config": self.batch_config,
         }
 
@@ -103,7 +103,7 @@ class LangGraphTask(BaseTask):
             "task_id": self.task_id,
             "task_name": self.task_name,
             "resources": self.resources,
-            "code_ser": self.serialized_code,
+            "serialized_code": self.serialized_code,
             "args": self.serialized_args,
             "kwargs": self.serialized_kwargs,
         }

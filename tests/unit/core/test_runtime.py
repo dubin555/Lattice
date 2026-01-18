@@ -95,9 +95,26 @@ class TestCodeTaskRuntime:
         assert result["workflow_id"] == "wf-1"
         assert result["task_id"] == "task-1"
         assert result["code_str"] == "def foo(): pass"
-        assert result["code_ser"] == "abc123"
+        assert result["serialized_code"] == "abc123"
 
     def test_from_dict(self):
+        data = {
+            "workflow_id": "wf-1",
+            "task_id": "task-1",
+            "resources": {"cpu": 2},
+            "task_input": {},
+            "task_output": {},
+            "code_str": "def bar(): pass",
+            "serialized_code": "xyz789",
+        }
+        task = CodeTaskRuntime.from_dict(data)
+
+        assert task.workflow_id == "wf-1"
+        assert task.task_id == "task-1"
+        assert task.resources == {"cpu": 2}
+
+    def test_from_dict_legacy_code_ser(self):
+        """Test backward compatibility with legacy code_ser field."""
         data = {
             "workflow_id": "wf-1",
             "task_id": "task-1",
@@ -108,10 +125,8 @@ class TestCodeTaskRuntime:
             "code_ser": "xyz789",
         }
         task = CodeTaskRuntime.from_dict(data)
-        
-        assert task.workflow_id == "wf-1"
-        assert task.task_id == "task-1"
-        assert task.resources == {"cpu": 2}
+
+        assert task.serialized_code == "xyz789"
 
 
 class TestLangGraphTaskRuntime:
@@ -137,11 +152,25 @@ class TestLangGraphTaskRuntime:
             serialized_kwargs="kwargs",
         )
         result = task.to_dict()
-        
+
         assert result["task_type"] == "langgraph"
-        assert result["code_ser"] == "abc123"
+        assert result["serialized_code"] == "abc123"
         assert result["args"] == "args"
         assert result["kwargs"] == "kwargs"
+
+    def test_from_dict_legacy_code_ser(self):
+        """Test backward compatibility with legacy code_ser field."""
+        data = {
+            "workflow_id": "wf-1",
+            "task_id": "task-1",
+            "resources": {"cpu": 1},
+            "code_ser": "abc123",
+            "args": "args",
+            "kwargs": "kwargs",
+        }
+        task = LangGraphTaskRuntime.from_dict(data)
+
+        assert task.serialized_code == "abc123"
 
 
 class TestCreateTaskRuntime:

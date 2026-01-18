@@ -217,7 +217,7 @@ class TestLangGraphRoutes:
             "workflow_id": "wf-1",
             "task_type": "langgraph",
             "task_name": "LG Task",
-            "code_ser": "abc123",
+            "serialized_code": "abc123",
             "resources": {"cpu": 1},
         })
         
@@ -235,7 +235,7 @@ class TestLangGraphRoutes:
             "workflow_id": "wf-1",
             "task_type": "langgraph",
             "task_name": "Another LG Task",
-            "code_ser": "xyz789",
+            "serialized_code": "xyz789",
             "resources": {"cpu": 2},
         })
         

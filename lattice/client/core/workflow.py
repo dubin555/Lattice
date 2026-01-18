@@ -86,7 +86,7 @@ class LatticeWorkflow:
             "task_id": task_id,
             "task_name": task_name,
             "code_str": metadata.code_str,
-            "code_ser": metadata.serialized_code,
+            "serialized_code": metadata.serialized_code,
             "task_input": task_input,
             "task_output": task_output,
             "resources": metadata.resources,

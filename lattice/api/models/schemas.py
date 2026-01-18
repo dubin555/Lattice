@@ -28,6 +28,8 @@ class SaveTaskRequest(BaseModel):
     task_output: Dict[str, Any]
     resources: Dict[str, Any]
     code_str: Optional[str] = None
+    serialized_code: Optional[str] = None
+    # Legacy field for backward compatibility
     code_ser: Optional[str] = None
 
 
@@ -63,7 +65,9 @@ class AddLangGraphTaskRequest(BaseModel):
     workflow_id: str
     task_type: str = "langgraph"
     task_name: str
-    code_ser: str
+    serialized_code: Optional[str] = None
+    # Legacy field for backward compatibility
+    code_ser: Optional[str] = None
     resources: Dict[str, Any]
 
 

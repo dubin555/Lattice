@@ -69,7 +69,7 @@ class LangGraphClient(BaseClient):
             "workflow_id": self.workflow_id,
             "task_type": "langgraph",
             "task_name": func.__name__,
-            "code_ser": serialized_code,
+            "serialized_code": serialized_code,
             "resources": resources,
         })
         

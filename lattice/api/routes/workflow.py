@@ -67,14 +67,16 @@ async def save_task(request: SaveTaskRequest):
     if task is None:
         raise TaskNotFoundError(request.task_id, request.workflow_id)
 
-    if not request.code_str and not request.code_ser:
-        raise HTTPException(status_code=400, detail="Either code_str or code_ser is required")
+    # Support both "serialized_code" (new) and "code_ser" (legacy) fields
+    serialized_code = request.serialized_code or request.code_ser
+    if not request.code_str and not serialized_code:
+        raise HTTPException(status_code=400, detail="Either code_str or serialized_code is required")
 
     task.save(
         task_input=request.task_input,
         task_output=request.task_output,
         code_str=request.code_str,
-        serialized_code=request.code_ser,
+        serialized_code=serialized_code,
         resources=request.resources,
     )
 
@@ -95,15 +97,16 @@ async def save_task_and_add_edge(request: Request):
         raise TaskNotFoundError(data["task_id"], data["workflow_id"])
 
     code_str = data.get("code_str")
-    code_ser = data.get("code_ser")
-    if not code_str and not code_ser:
-        raise HTTPException(status_code=400, detail="Either code_str or code_ser is required")
+    # Support both "serialized_code" (new) and "code_ser" (legacy) keys
+    serialized_code = data.get("serialized_code") or data.get("code_ser")
+    if not code_str and not serialized_code:
+        raise HTTPException(status_code=400, detail="Either code_str or serialized_code is required")
 
     task.save(
         task_input=data["task_input"],
         task_output=data["task_output"],
         code_str=code_str,
-        serialized_code=code_ser,
+        serialized_code=serialized_code,
         resources=data["resources"],
         batch_config=data.get("batch_config"),
     )

@@ -78,9 +78,22 @@ class TestSaveTaskRequest:
             code_str="def foo(): pass",
         )
         assert req.code_str == "def foo(): pass"
+        assert req.serialized_code is None
         assert req.code_ser is None
 
-    def test_valid_with_code_ser(self):
+    def test_valid_with_serialized_code(self):
+        req = SaveTaskRequest(
+            workflow_id="wf-1",
+            task_id="task-1",
+            task_input={},
+            task_output={},
+            resources={},
+            serialized_code="abc123",
+        )
+        assert req.serialized_code == "abc123"
+
+    def test_valid_with_code_ser_legacy(self):
+        """Test backward compatibility with legacy code_ser field."""
         req = SaveTaskRequest(
             workflow_id="wf-1",
             task_id="task-1",
@@ -148,10 +161,20 @@ class TestAddLangGraphTaskRequest:
         req = AddLangGraphTaskRequest(
             workflow_id="wf-1",
             task_name="LG Task",
-            code_ser="abc123",
+            serialized_code="abc123",
             resources={"cpu": 1, "gpu": 0},
         )
         assert req.task_type == "langgraph"
+        assert req.serialized_code == "abc123"
+
+    def test_valid_with_code_ser_legacy(self):
+        """Test backward compatibility with legacy code_ser field."""
+        req = AddLangGraphTaskRequest(
+            workflow_id="wf-1",
+            task_name="LG Task",
+            code_ser="abc123",
+            resources={"cpu": 1, "gpu": 0},
+        )
         assert req.code_ser == "abc123"
 
 

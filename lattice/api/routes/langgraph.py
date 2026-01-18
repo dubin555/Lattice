@@ -28,11 +28,13 @@ async def add_langgraph_task(request: AddLangGraphTaskRequest):
         orchestrator._workflows[request.workflow_id] = workflow
 
     task_id = str(uuid.uuid4())
+    # Support both "serialized_code" (new) and "code_ser" (legacy) fields
+    serialized_code = request.serialized_code or request.code_ser
     task = LangGraphTask(
         workflow_id=request.workflow_id,
         task_id=task_id,
         task_name=request.task_name,
-        serialized_code=request.code_ser,
+        serialized_code=serialized_code,
         resources=request.resources,
     )
     workflow.add_task(task_id, task)
