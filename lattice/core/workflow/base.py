@@ -142,19 +142,16 @@ class BaseWorkflow(ABC):
 
 class Workflow(BaseWorkflow):
     def __init__(self, workflow_id: str):
-        self.workflow_id = workflow_id
+        super().__init__(workflow_id)
         self._tasks: Dict[str, CodeTask] = {}
         self._graph: nx.DiGraph = nx.DiGraph()
 
     def add_task(self, task_id: str, task: CodeTask) -> None:
-        if task_id != task.task_id:
-            raise ValueError("task_id must match task.task_id")
-        self._tasks[task_id] = task
+        super().add_task(task_id, task)
         self._graph.add_node(task_id)
 
     def remove_task(self, task_id: str) -> None:
-        if task_id in self._tasks:
-            del self._tasks[task_id]
+        super().remove_task(task_id)
         if task_id in self._graph:
             self._graph.remove_node(task_id)
 
@@ -204,5 +201,5 @@ class Workflow(BaseWorkflow):
 
 class LangGraphWorkflow(BaseWorkflow):
     def __init__(self, workflow_id: str):
-        self.workflow_id = workflow_id
+        super().__init__(workflow_id)
         self._tasks: Dict[str, LangGraphTask] = {}

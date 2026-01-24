@@ -79,28 +79,19 @@ class TaskExecutionError(ExecutorError):
 
 
 class TaskCancelledError(ExecutorError):
-    def __init__(self, task_id_or_message: str = "", task_id: str = None):
-        if task_id is not None:
-            super().__init__(f"Task cancelled: {task_id}", {"task_id": task_id})
-            self.task_id = task_id
-        else:
-            super().__init__(f"Task cancelled: {task_id_or_message}", {"task_id": task_id_or_message})
-            self.task_id = task_id_or_message
+    def __init__(self, task_id: str):
+        super().__init__(f"Task cancelled: {task_id}", {"task_id": task_id})
+        self.task_id = task_id
 
 
 class NodeFailedError(ExecutorError):
-    def __init__(self, node_id_or_message: str = "", node_id: str = None, task_id: str = None):
-        if node_id is not None:
-            details = {"node_id": node_id}
-            if task_id:
-                details["task_id"] = task_id
-            super().__init__(f"Node failed: {node_id}", details)
-            self.node_id = node_id
-            self.task_id = task_id
-        else:
-            super().__init__(f"Node failed: {node_id_or_message}", {"node_id": node_id_or_message})
-            self.node_id = node_id_or_message
-            self.task_id = None
+    def __init__(self, node_id: str, task_id: Optional[str] = None):
+        details = {"node_id": node_id}
+        if task_id:
+            details["task_id"] = task_id
+        super().__init__(f"Node failed: {node_id}", details)
+        self.node_id = node_id
+        self.task_id = task_id
 
 
 class CyclicDependencyError(ValidationError):

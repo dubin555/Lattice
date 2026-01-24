@@ -81,7 +81,6 @@ class TestMessageBus:
         bus = MessageBus()
         assert bus.to_scheduler_queue is not None
         assert bus.from_scheduler_queue is not None
-        assert bus.ready_queue is not None
 
     def test_send_receive_to_scheduler(self):
         bus = MessageBus()
@@ -152,7 +151,3 @@ class TestMessageBus:
         
         assert len(received) == 3
         assert [m.data["id"] for m in received] == ["1", "2", "3"]
-
-    def test_close(self):
-        bus = MessageBus()
-        bus.close()

@@ -17,6 +17,8 @@ class LangGraphClient(BaseClient):
     Inherits from BaseClient to provide common HTTP request functionality.
     """
 
+    _VALID_RESOURCE_KEYS = {"cpu", "gpu", "cpu_mem", "gpu_mem"}
+
     def __init__(self, server_url: str = "http://localhost:8000"):
         """
         Initialize the LangGraph client.
@@ -30,22 +32,25 @@ class LangGraphClient(BaseClient):
         response = self._post("/create_workflow")
         self.workflow_id = response["workflow_id"]
 
+    def _merge_resources(self, resources: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Merge user-provided resources with defaults."""
+        if resources is None:
+            return self._default_resources.copy()
+
+        invalid_keys = set(resources.keys()) - self._VALID_RESOURCE_KEYS
+        if invalid_keys:
+            raise ValueError(f"Invalid resource key(s): {', '.join(invalid_keys)}")
+
+        merged = self._default_resources.copy()
+        merged.update(resources)
+        return merged
+
     def task(self, func_or_resources=None, *, resources: Optional[Dict[str, Any]] = None):
         if callable(func_or_resources):
-            return self._decorate(func_or_resources, self._default_resources)
-        
-        if resources is None:
-            resources = self._default_resources
-        else:
-            for key in resources:
-                if key not in ["cpu", "gpu", "cpu_mem", "gpu_mem"]:
-                    raise ValueError(f"Invalid resource key: {key}")
-            
-            merged = self._default_resources.copy()
-            merged.update(resources)
-            resources = merged
-        
-        return lambda func: self._decorate(func, resources)
+            return self._decorate(func_or_resources, self._default_resources.copy())
+
+        merged_resources = self._merge_resources(resources)
+        return lambda func: self._decorate(func, merged_resources)
 
     def _decorate(self, func: Callable, resources: Dict[str, Any]) -> Callable:
         @functools.wraps(func)

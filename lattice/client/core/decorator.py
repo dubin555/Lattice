@@ -85,10 +85,8 @@ def task(
 
         resources_config = normalize_resources(resources)
 
-        if data_types is None:
-            types_config = {param: "str" for param in inputs + outputs}
-        else:
-            types_config = {param: "str" for param in inputs + outputs}
+        types_config = {param: "str" for param in inputs + outputs}
+        if data_types:
             types_config.update(data_types)
 
         batch_config = BatchConfig(

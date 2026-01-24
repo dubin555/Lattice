@@ -122,34 +122,40 @@ class ResourceManager:
         return resources
 
     def add_node(self, node_id: str, node_ip: str, resources: Dict[str, Any]) -> None:
+        cpu_count = resources.get("cpu", 0)
+        memory_bytes = resources.get("cpu_mem", 0)
+
         gpu_resources = {}
         for gpu_id, gpu_data in resources.get("gpu_resource", {}).items():
             gpu_id_int = int(gpu_id)
+            gpu_mem = gpu_data["gpu_mem"]
             gpu_resources[gpu_id_int] = GpuResource(
                 gpu_id=gpu_id_int,
-                gpu_memory_total=gpu_data["gpu_mem"],
-                gpu_memory_available=gpu_data["gpu_mem"],
+                gpu_memory_total=gpu_mem,
+                gpu_memory_available=gpu_mem,
                 gpu_count=gpu_data.get("gpu_num", 1),
             )
 
         node_resources = NodeResources(
-            cpu_count=resources.get("cpu", 0),
-            memory_bytes=resources.get("cpu_mem", 0),
+            cpu_count=cpu_count,
+            memory_bytes=memory_bytes,
             gpu_resources=gpu_resources,
         )
 
+        # Total resources is a copy with gpu_memory_available reset to total
+        total_gpu_resources = {
+            gpu_id: GpuResource(
+                gpu_id=gpu.gpu_id,
+                gpu_memory_total=gpu.gpu_memory_total,
+                gpu_memory_available=gpu.gpu_memory_total,
+                gpu_count=1,
+            )
+            for gpu_id, gpu in gpu_resources.items()
+        }
         total_resources = NodeResources(
-            cpu_count=resources.get("cpu", 0),
-            memory_bytes=resources.get("cpu_mem", 0),
-            gpu_resources={
-                k: GpuResource(
-                    gpu_id=v.gpu_id,
-                    gpu_memory_total=v.gpu_memory_total,
-                    gpu_memory_available=v.gpu_memory_total,
-                    gpu_count=1,
-                )
-                for k, v in gpu_resources.items()
-            },
+            cpu_count=cpu_count,
+            memory_bytes=memory_bytes,
+            gpu_resources=total_gpu_resources,
         )
 
         self._nodes[node_id] = Node(

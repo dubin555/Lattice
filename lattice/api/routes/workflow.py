@@ -20,6 +20,7 @@ from lattice.core.workflow.base import CodeTask, TaskType
 from lattice.exceptions import WorkflowNotFoundError, TaskNotFoundError
 from lattice.api.dependencies import get_orchestrator
 from lattice.api.exceptions import handle_route_exceptions
+from lattice.utils.compat import get_serialized_code
 
 router = APIRouter(tags=["workflow"])
 
@@ -97,8 +98,7 @@ async def save_task_and_add_edge(request: Request):
         raise TaskNotFoundError(data["task_id"], data["workflow_id"])
 
     code_str = data.get("code_str")
-    # Support both "serialized_code" (new) and "code_ser" (legacy) keys
-    serialized_code = data.get("serialized_code") or data.get("code_ser")
+    serialized_code = get_serialized_code(data)
     if not code_str and not serialized_code:
         raise HTTPException(status_code=400, detail="Either code_str or serialized_code is required")
 
@@ -175,9 +175,9 @@ async def run_workflow(request: RunWorkflowRequest):
 
 @router.websocket("/get_workflow_res/{workflow_id}/{run_id}")
 async def get_workflow_results(websocket: WebSocket, workflow_id: str, run_id: str):
+    orchestrator = get_orchestrator()
     try:
         await websocket.accept()
-        orchestrator = get_orchestrator()
 
         results = await orchestrator.wait_workflow_complete(run_id)
 
@@ -190,6 +190,6 @@ async def get_workflow_results(websocket: WebSocket, workflow_id: str, run_id: s
         })
 
         await websocket.close()
-    except Exception as e:
+    except Exception:
         await orchestrator.stop_workflow(run_id)
         await websocket.close()

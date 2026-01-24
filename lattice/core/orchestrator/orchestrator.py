@@ -14,17 +14,13 @@ from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
 from lattice.core.scheduler.scheduler import Scheduler
 from lattice.core.workflow.base import Workflow, LangGraphWorkflow, CodeTask, LangGraphTask
 
-# Import metrics - optional dependency
-try:
-    from lattice.observability.metrics import (
-        record_workflow_created,
-        record_workflow_started,
-        record_workflow_completed,
-        record_workflow_failed,
-    )
-    METRICS_ENABLED = True
-except ImportError:
-    METRICS_ENABLED = False
+# Import metrics - functions are safe to call even if not initialized
+from lattice.observability.metrics import (
+    record_workflow_created,
+    record_workflow_started,
+    record_workflow_completed,
+    record_workflow_failed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +38,6 @@ class BaseContext(ABC):
 
     @abstractmethod
     async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
-        pass
-
-    @abstractmethod
-    async def on_llm_instance_ready(self, msg_data: Dict[str, Any]) -> None:
         pass
 
 
@@ -133,16 +125,13 @@ class Orchestrator:
                 await ctx.on_task_started(msg_data)
             elif msg_type == MessageType.TASK_EXCEPTION:
                 await ctx.on_task_exception(msg_data)
-            elif msg_type == MessageType.FINISH_LLM_INSTANCE_LAUNCH:
-                await ctx.on_llm_instance_ready(msg_data)
 
     def create_workflow(self, workflow_id: str) -> Workflow:
         """Create a new workflow."""
         workflow = Workflow(workflow_id)
         self._workflows[workflow_id] = workflow
 
-        if METRICS_ENABLED:
-            record_workflow_created()
+        record_workflow_created()
 
         return workflow
 
@@ -171,8 +160,7 @@ class Orchestrator:
         self._workflow_start_times[run_id] = time.time()
         ctx.submit_start_tasks()
 
-        if METRICS_ENABLED:
-            record_workflow_started()
+        record_workflow_started()
 
         return run_id
 
@@ -191,14 +179,13 @@ class Orchestrator:
 
         results = await ctx.wait_complete()
 
-        if METRICS_ENABLED:
-            start_time = self._workflow_start_times.pop(run_id, None)
-            if start_time:
-                duration = time.time() - start_time
-                if results and results[-1].get("type") == MessageType.TASK_EXCEPTION.value:
-                    record_workflow_failed(duration)
-                else:
-                    record_workflow_completed(duration)
+        start_time = self._workflow_start_times.pop(run_id, None)
+        if start_time:
+            duration = time.time() - start_time
+            if results and results[-1].get("type") == MessageType.TASK_EXCEPTION.value:
+                record_workflow_failed(duration)
+            else:
+                record_workflow_completed(duration)
 
         self._message_bus.send_to_scheduler(Message(
             message_type=MessageType.CLEAR_WORKFLOW,
@@ -213,11 +200,10 @@ class Orchestrator:
             if run_id in self._run_contexts:
                 del self._run_contexts[run_id]
 
-        if METRICS_ENABLED:
-            start_time = self._workflow_start_times.pop(run_id, None)
-            if start_time:
-                duration = time.time() - start_time
-                record_workflow_failed(duration)
+        start_time = self._workflow_start_times.pop(run_id, None)
+        if start_time:
+            duration = time.time() - start_time
+            record_workflow_failed(duration)
 
         self._message_bus.send_to_scheduler(Message(
             message_type=MessageType.STOP_WORKFLOW,
@@ -288,10 +274,6 @@ class Orchestrator:
         if self._scheduler:
             self._scheduler.stop()
 
-        # Close message bus
-        if self._message_bus:
-            self._message_bus.close()
-
         logger.info("Orchestrator cleanup complete")
 
 
@@ -348,10 +330,6 @@ class RunContext(BaseContext):
             "data": msg_data,
         })
 
-    async def on_llm_instance_ready(self, msg_data: Dict[str, Any]) -> None:
-        """Handle LLM instance ready notification."""
-        pass
-
     async def wait_complete(self) -> List[Dict[str, Any]]:
         """Wait for the workflow to complete."""
         total_tasks = self.workflow.task_count
@@ -388,10 +366,6 @@ class SingleTaskContext(BaseContext):
     async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
         """Handle task exception."""
         await self.result_queue.put(msg_data.get("result"))
-
-    async def on_llm_instance_ready(self, msg_data: Dict[str, Any]) -> None:
-        """Handle LLM instance ready notification."""
-        pass
 
     async def wait_result(self) -> Any:
         """Wait for the task result."""

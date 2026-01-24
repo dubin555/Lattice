@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Type, Callable
 
 from lattice.core.resource.node import SelectedNode
 from lattice.core.workflow.base import TaskType
+from lattice.utils.compat import get_serialized_code
 
 
 class TaskStatus(Enum):
@@ -107,8 +108,6 @@ class CodeTaskRuntime(BaseTaskRuntime):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CodeTaskRuntime":
-        # Support both "serialized_code" (new) and "code_ser" (legacy) keys
-        serialized_code = data.get("serialized_code") or data.get("code_ser")
         return cls(
             workflow_id=data["workflow_id"],
             task_id=data["task_id"],
@@ -116,7 +115,7 @@ class CodeTaskRuntime(BaseTaskRuntime):
             task_input=data.get("task_input", {}),
             task_output=data.get("task_output", {}),
             code_str=data.get("code_str"),
-            serialized_code=serialized_code,
+            serialized_code=get_serialized_code(data),
             task_name=data.get("task_name"),
             batch_config=data.get("batch_config"),
         )
@@ -146,13 +145,11 @@ class LangGraphTaskRuntime(BaseTaskRuntime):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LangGraphTaskRuntime":
-        # Support both "serialized_code" (new) and "code_ser" (legacy) keys
-        serialized_code = data.get("serialized_code") or data.get("code_ser", "")
         return cls(
             workflow_id=data["workflow_id"],
             task_id=data["task_id"],
             resources=data.get("resources", {}),
-            serialized_code=serialized_code,
+            serialized_code=get_serialized_code(data, ""),
             serialized_args=data.get("args", ""),
             serialized_kwargs=data.get("kwargs", ""),
         )

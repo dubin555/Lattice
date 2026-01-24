@@ -94,8 +94,3 @@ class MessageBus:
     def wait_ready(self, timeout: Optional[float] = None) -> bool:
         """Wait for the scheduler to be ready."""
         return self._ready_event.wait(timeout=timeout)
-
-    def close(self) -> None:
-        """Clean up resources."""
-        # queue.Queue doesn't need explicit closing
-        pass
