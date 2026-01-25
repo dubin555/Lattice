@@ -2,6 +2,7 @@
 Resource manager for distributed node management.
 """
 import logging
+import threading
 import time
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -37,8 +38,11 @@ class TaskResourceRequirements:
 
 
 class ResourceManager:
+    """Thread-safe resource manager for distributed node management."""
+
     def __init__(self):
         self._nodes: Dict[str, Node] = {}
+        self._lock = threading.RLock()
         self._head_node_id: Optional[str] = None
         self._head_node_ip: Optional[str] = None
         self._last_log_time: float = 0
@@ -158,43 +162,52 @@ class ResourceManager:
             gpu_resources=total_gpu_resources,
         )
 
-        self._nodes[node_id] = Node(
-            node_id=node_id,
-            node_ip=node_ip,
-            available_resources=node_resources,
-            total_resources=total_resources,
-            status=NodeStatus.ALIVE,
-        )
+        with self._lock:
+            self._nodes[node_id] = Node(
+                node_id=node_id,
+                node_ip=node_ip,
+                available_resources=node_resources,
+                total_resources=total_resources,
+                status=NodeStatus.ALIVE,
+            )
         logger.info(f"Added node {node_id} at {node_ip}")
 
     def remove_node(self, node_id: str) -> None:
-        if node_id in self._nodes:
-            del self._nodes[node_id]
-            logger.info(f"Removed node {node_id}")
+        with self._lock:
+            if node_id in self._nodes:
+                del self._nodes[node_id]
+                logger.info(f"Removed node {node_id}")
 
     def get_node(self, node_id: str) -> Optional[Node]:
-        return self._nodes.get(node_id)
+        with self._lock:
+            return self._nodes.get(node_id)
 
     def select_node(self, requirements: TaskResourceRequirements) -> Optional[SelectedNode]:
-        for node_id, node in self._nodes.items():
-            if node.can_run_task(
-                cpu=requirements.cpu,
-                memory=requirements.memory_bytes,
-                gpu=requirements.gpu,
-                gpu_memory=requirements.gpu_memory,
-            ):
-                gpu_id = node.allocate_resources(
+        """Thread-safe node selection with atomic check-and-allocate."""
+        with self._lock:
+            for node_id, node in list(self._nodes.items()):
+                if node.can_run_task(
                     cpu=requirements.cpu,
                     memory=requirements.memory_bytes,
                     gpu=requirements.gpu,
                     gpu_memory=requirements.gpu_memory,
-                )
-                return SelectedNode(
-                    node_id=node_id,
-                    node_ip=node.node_ip,
-                    gpu_id=gpu_id,
-                )
-        
+                ):
+                    try:
+                        gpu_id = node.allocate_resources(
+                            cpu=requirements.cpu,
+                            memory=requirements.memory_bytes,
+                            gpu=requirements.gpu,
+                            gpu_memory=requirements.gpu_memory,
+                        )
+                        return SelectedNode(
+                            node_id=node_id,
+                            node_ip=node.node_ip,
+                            gpu_id=gpu_id,
+                        )
+                    except ValueError:
+                        # Allocation failed, try next node
+                        continue
+
         logger.debug("No suitable node found for task requirements")
         return None
 
@@ -204,61 +217,65 @@ class ResourceManager:
         requirements: TaskResourceRequirements,
         gpu_id: Optional[int] = None,
     ) -> None:
-        node = self._nodes.get(node_id)
-        if node is None:
-            logger.warning(f"Cannot release resources: node {node_id} not found")
-            return
-        
-        node.release_resources(
-            cpu=requirements.cpu,
-            memory=requirements.memory_bytes,
-            gpu=requirements.gpu,
-            gpu_memory=requirements.gpu_memory,
-            gpu_id=gpu_id,
-        )
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                logger.warning(f"Cannot release resources: node {node_id} not found")
+                return
+
+            node.release_resources(
+                cpu=requirements.cpu,
+                memory=requirements.memory_bytes,
+                gpu=requirements.gpu,
+                gpu_memory=requirements.gpu_memory,
+                gpu_id=gpu_id,
+            )
 
     def check_node_health(self) -> List[str]:
         import ray
-        
+
         dead_nodes = []
         ray_nodes = {n["NodeID"]: n for n in ray.nodes()}
-        
-        for node_id, node in list(self._nodes.items()):
-            ray_node = ray_nodes.get(node_id)
-            if ray_node is None or not ray_node.get("Alive", False):
-                node.status = NodeStatus.DEAD
-                dead_nodes.append(node_id)
-                del self._nodes[node_id]
-                logger.warning(f"Node {node_id} is dead, removed from pool")
-        
+
+        with self._lock:
+            for node_id, node in list(self._nodes.items()):
+                ray_node = ray_nodes.get(node_id)
+                if ray_node is None or not ray_node.get("Alive", False):
+                    node.status = NodeStatus.DEAD
+                    dead_nodes.append(node_id)
+                    del self._nodes[node_id]
+                    logger.warning(f"Node {node_id} is dead, removed from pool")
+
         return dead_nodes
 
     def log_node_status(self) -> None:
         current_time = time.time()
         if current_time - self._last_log_time < self._log_interval:
             return
-        
+
         self._last_log_time = current_time
-        logger.debug(f"=== Node Status ({len(self._nodes)} nodes) ===")
-        for node_id, node in self._nodes.items():
-            logger.debug(
-                f"  Node {node_id[:8]}: CPU={node.available_resources.cpu_count:.1f}, "
-                f"Memory={node.available_resources.memory_bytes}, "
-                f"GPUs={len(node.available_resources.gpu_resources)}"
-            )
+        with self._lock:
+            logger.debug(f"=== Node Status ({len(self._nodes)} nodes) ===")
+            for node_id, node in self._nodes.items():
+                logger.debug(
+                    f"  Node {node_id[:8]}: CPU={node.available_resources.cpu_count:.1f}, "
+                    f"Memory={node.available_resources.memory_bytes}, "
+                    f"GPUs={len(node.available_resources.gpu_resources)}"
+                )
 
     def get_cluster_status(self) -> Dict[str, Any]:
-        return {
-            "node_count": len(self._nodes),
-            "head_node_id": self._head_node_id,
-            "head_node_ip": self._head_node_ip,
-            "nodes": {
-                node_id: {
-                    "node_ip": node.node_ip,
-                    "status": node.status.value,
-                    "available_cpu": node.available_resources.cpu_count,
-                    "available_memory": node.available_resources.memory_bytes,
-                    "gpu_count": len(node.available_resources.gpu_resources),
+        with self._lock:
+            return {
+                "node_count": len(self._nodes),
+                "head_node_id": self._head_node_id,
+                "head_node_ip": self._head_node_ip,
+                "nodes": {
+                    node_id: {
+                        "node_ip": node.node_ip,
+                        "status": node.status.value,
+                        "available_cpu": node.available_resources.cpu_count,
+                        "available_memory": node.available_resources.memory_bytes,
+                        "gpu_count": len(node.available_resources.gpu_resources),
                 }
                 for node_id, node in self._nodes.items()
             },

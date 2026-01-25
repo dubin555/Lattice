@@ -101,3 +101,22 @@ class CyclicDependencyError(ValidationError):
             {"cycle": cycle} if cycle else {}
         )
         self.cycle = cycle
+
+
+class WebSocketError(ClientError):
+    """Exception raised when WebSocket communication fails."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(f"WebSocket error: {message}", details)
+
+
+class WorkflowTimeoutError(ClientError):
+    """Exception raised when workflow execution times out."""
+
+    def __init__(self, run_id: str, timeout: float):
+        super().__init__(
+            f"Workflow execution timed out after {timeout}s",
+            {"run_id": run_id, "timeout": timeout}
+        )
+        self.run_id = run_id
+        self.timeout = timeout

@@ -4,14 +4,18 @@ Client models for task and workflow management.
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 
+# Separator used in task output references
+# Format: "{task_id}.output.{output_key}"
+TASK_REFERENCE_SEPARATOR = ".output."
+
 
 @dataclass
 class TaskOutput:
     task_id: str
     output_key: str
-    
+
     def to_reference_string(self) -> str:
-        return f"{self.task_id}.output.{self.output_key}"
+        return f"{self.task_id}{TASK_REFERENCE_SEPARATOR}{self.output_key}"
 
 
 class TaskOutputs:

@@ -98,15 +98,24 @@ class Node:
         return True
 
     def allocate_resources(self, cpu: float, memory: int, gpu: int = 0, gpu_memory: int = 0) -> Optional[int]:
+        """Allocate resources with rollback on failure.
+
+        Raises:
+            ValueError: If GPU is required but not available, after rolling back CPU/memory.
+        """
         self.available_resources.allocate_cpu(cpu)
         self.available_resources.allocate_memory(memory)
-        
+
         gpu_id = None
         if gpu > 0:
             gpu_id = self.available_resources.get_available_gpu(gpu_memory)
-            if gpu_id is not None:
-                self.available_resources.gpu_resources[gpu_id].allocate(gpu_memory, gpu)
-        
+            if gpu_id is None:
+                # Rollback CPU and memory allocation
+                self.available_resources.release_cpu(cpu)
+                self.available_resources.release_memory(memory)
+                raise ValueError(f"No GPU available with {gpu_memory} bytes memory")
+            self.available_resources.gpu_resources[gpu_id].allocate(gpu_memory, gpu)
+
         return gpu_id
 
     def release_resources(self, cpu: float, memory: int, gpu: int = 0, gpu_memory: int = 0, gpu_id: Optional[int] = None) -> None:

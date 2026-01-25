@@ -7,12 +7,12 @@ import copy
 import logging
 import time
 import uuid
-from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Union
 
+from lattice.core.orchestrator.context import BaseContext, RunContext, SingleTaskContext
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
 from lattice.core.scheduler.scheduler import Scheduler
-from lattice.core.workflow.base import Workflow, LangGraphWorkflow, CodeTask, LangGraphTask
+from lattice.core.workflow.base import Workflow, LangGraphWorkflow
 
 # Import metrics - functions are safe to call even if not initialized
 from lattice.observability.metrics import (
@@ -23,22 +23,6 @@ from lattice.observability.metrics import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class BaseContext(ABC):
-    """Base class for workflow/task execution contexts."""
-
-    @abstractmethod
-    async def on_task_finished(self, msg_data: Dict[str, Any]) -> None:
-        pass
-
-    @abstractmethod
-    async def on_task_started(self, msg_data: Dict[str, Any]) -> None:
-        pass
-
-    @abstractmethod
-    async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
-        pass
 
 
 class Orchestrator:
@@ -56,7 +40,7 @@ class Orchestrator:
         self._lock = asyncio.Lock()
 
         self._workflows: Dict[str, Union[Workflow, LangGraphWorkflow]] = {}
-        self._run_contexts: Dict[str, "RunContext"] = {}
+        self._run_contexts: Dict[str, BaseContext] = {}
         self._workflow_start_times: Dict[str, float] = {}
 
         self._monitor_task: Optional[asyncio.Task] = None
@@ -169,6 +153,8 @@ class Orchestrator:
         ctx = self._run_contexts.get(run_id)
         if ctx is None:
             raise ValueError(f"Run {run_id} not found")
+        if not isinstance(ctx, RunContext):
+            raise ValueError(f"Run {run_id} is not a workflow run")
         return ctx.result_queue
 
     async def wait_workflow_complete(self, run_id: str) -> List[Dict[str, Any]]:
@@ -176,6 +162,8 @@ class Orchestrator:
         ctx = self._run_contexts.get(run_id)
         if ctx is None:
             raise ValueError(f"Run {run_id} not found")
+        if not isinstance(ctx, RunContext):
+            raise ValueError(f"Run {run_id} is not a workflow run")
 
         results = await ctx.wait_complete()
 
@@ -275,98 +263,3 @@ class Orchestrator:
             self._scheduler.stop()
 
         logger.info("Orchestrator cleanup complete")
-
-
-class RunContext(BaseContext):
-    """Context for tracking workflow execution."""
-
-    def __init__(self, run_id: str, workflow: Workflow, message_bus: MessageBus):
-        self.run_id = run_id
-        self.workflow = workflow
-        self.message_bus = message_bus
-        self.result_queue: asyncio.Queue = asyncio.Queue()
-        self.completed_count = 0
-
-    def submit_start_tasks(self) -> None:
-        """Submit initial tasks that have no dependencies."""
-        start_tasks = self.workflow.get_start_tasks()
-        for task in start_tasks:
-            task_data = task.to_dict()
-            task_data["workflow_id"] = self.run_id
-            self.message_bus.send_to_scheduler(Message(
-                message_type=MessageType.RUN_TASK,
-                data=task_data,
-            ))
-
-    async def on_task_finished(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task completion."""
-        await self.result_queue.put({
-            "type": MessageType.FINISH_TASK.value,
-            "data": msg_data,
-        })
-
-        task_id = msg_data.get("task_id")
-        ready_tasks = self.workflow.get_ready_tasks_after_completion(task_id)
-
-        for task in ready_tasks:
-            task_data = task.to_dict()
-            task_data["workflow_id"] = self.run_id
-            self.message_bus.send_to_scheduler(Message(
-                message_type=MessageType.RUN_TASK,
-                data=task_data,
-            ))
-
-    async def on_task_started(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task start notification."""
-        await self.result_queue.put({
-            "type": MessageType.START_TASK.value,
-            "data": msg_data,
-        })
-
-    async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task exception."""
-        await self.result_queue.put({
-            "type": MessageType.TASK_EXCEPTION.value,
-            "data": msg_data,
-        })
-
-    async def wait_complete(self) -> List[Dict[str, Any]]:
-        """Wait for the workflow to complete."""
-        total_tasks = self.workflow.task_count
-        results = []
-        completed_count = 0
-
-        while completed_count < total_tasks:
-            msg = await self.result_queue.get()
-            results.append(msg)
-
-            if msg["type"] == MessageType.FINISH_TASK.value:
-                completed_count += 1
-            elif msg["type"] == MessageType.TASK_EXCEPTION.value:
-                break
-
-        return results
-
-
-class SingleTaskContext(BaseContext):
-    """Context for tracking single task execution."""
-
-    def __init__(self, task_id: str):
-        self.task_id = task_id
-        self.result_queue: asyncio.Queue = asyncio.Queue()
-
-    async def on_task_finished(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task completion."""
-        await self.result_queue.put(msg_data.get("result"))
-
-    async def on_task_started(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task start notification."""
-        pass
-
-    async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
-        """Handle task exception."""
-        await self.result_queue.put(msg_data.get("result"))
-
-    async def wait_result(self) -> Any:
-        """Wait for the task result."""
-        return await self.result_queue.get()

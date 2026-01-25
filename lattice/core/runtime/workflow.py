@@ -10,6 +10,7 @@ from lattice.core.runtime.task import (
     LangGraphTaskRuntime,
     TaskStatus,
 )
+from lattice.core.runtime.task_reference import TaskReference
 from lattice.core.resource.node import SelectedNode
 
 logger = logging.getLogger(__name__)
@@ -66,18 +67,20 @@ class WorkflowRuntime:
         return [task for task in self._tasks.values() if task.is_running()]
 
     def get_task_result(self, key: str) -> Optional[Any]:
-        parts = key.split(".")
-        if len(parts) < 3:
+        """Get a task result by reference key.
+
+        Args:
+            key: Reference string in format "{task_id}.output.{output_key}"
+        """
+        ref = TaskReference.from_string(key)
+        if ref is None:
             return None
-        
-        task_id = parts[0]
-        output_key = parts[2]
-        
-        task = self._tasks.get(task_id)
+
+        task = self._tasks.get(ref.task_id)
         if task is None or task.result is None:
             return None
-        
-        return task.result.get(output_key)
+
+        return task.result.get(ref.output_key)
 
 
 class WorkflowRuntimeManager:

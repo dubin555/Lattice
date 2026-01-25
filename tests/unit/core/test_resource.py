@@ -162,3 +162,164 @@ class TestTaskResourceRequirements:
         req = TaskResourceRequirements(cpu=2.0, memory_bytes=4000, gpu=1, gpu_memory=2000)
         result = req.to_dict()
         assert result == {"cpu": 2.0, "cpu_mem": 4000, "gpu": 1, "gpu_mem": 2000}
+
+
+class TestNodeAllocateResourcesRollback:
+    """Test rollback mechanism in Node.allocate_resources()."""
+
+    def test_allocate_resources_rollback_on_gpu_failure(self):
+        """When GPU allocation fails, CPU and memory should be rolled back."""
+        resources = NodeResources(cpu_count=8.0, memory_bytes=16000)
+        node = Node(
+            node_id="node-1",
+            node_ip="192.168.1.1",
+            available_resources=resources,
+            total_resources=resources,
+        )
+        original_cpu = node.available_resources.cpu_count
+        original_memory = node.available_resources.memory_bytes
+
+        # Request GPU when no GPU is available - should fail and rollback
+        with pytest.raises(ValueError, match="No GPU available"):
+            node.allocate_resources(cpu=2.0, memory=4000, gpu=1, gpu_memory=2000)
+
+        # Verify CPU and memory were rolled back
+        assert node.available_resources.cpu_count == original_cpu
+        assert node.available_resources.memory_bytes == original_memory
+
+    def test_allocate_resources_success_with_gpu(self):
+        """Successful GPU allocation should not trigger rollback."""
+        gpu = GpuResource(gpu_id=0, gpu_memory_total=8000, gpu_memory_available=8000)
+        resources = NodeResources(cpu_count=8.0, memory_bytes=16000, gpu_resources={0: gpu})
+        node = Node(
+            node_id="node-1",
+            node_ip="192.168.1.1",
+            available_resources=resources,
+            total_resources=resources,
+        )
+
+        gpu_id = node.allocate_resources(cpu=2.0, memory=4000, gpu=1, gpu_memory=2000)
+
+        assert gpu_id == 0
+        assert node.available_resources.cpu_count == 6.0
+        assert node.available_resources.memory_bytes == 12000
+        assert node.available_resources.gpu_resources[0].gpu_memory_available == 6000
+
+
+class TestResourceManagerConcurrency:
+    """Test thread-safety of ResourceManager operations."""
+
+    def test_concurrent_select_node_no_overallocation(self):
+        """Multiple threads selecting nodes should not over-allocate resources."""
+        import threading
+
+        manager = ResourceManager()
+        # Add a node with exactly 4 CPU units
+        manager.add_node(
+            node_id="node-1",
+            node_ip="192.168.1.1",
+            resources={"cpu": 4.0, "cpu_mem": 16000, "gpu_resource": {}},
+        )
+
+        results = []
+        errors = []
+
+        def try_allocate():
+            try:
+                # Each request needs 1 CPU
+                req = TaskResourceRequirements(cpu=1.0, memory_bytes=1000)
+                result = manager.select_node(req)
+                if result:
+                    results.append(result)
+            except Exception as e:
+                errors.append(e)
+
+        # Start 8 threads, each trying to allocate 1 CPU (but only 4 available)
+        threads = [threading.Thread(target=try_allocate) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should have exactly 4 successful allocations (no over-allocation)
+        assert len(errors) == 0
+        assert len(results) == 4
+
+    def test_concurrent_add_remove_nodes(self):
+        """Concurrent node add/remove operations should be thread-safe."""
+        import threading
+
+        manager = ResourceManager()
+        errors = []
+
+        def add_nodes():
+            try:
+                for i in range(10):
+                    manager.add_node(
+                        node_id=f"node-add-{threading.current_thread().name}-{i}",
+                        node_ip=f"192.168.1.{i}",
+                        resources={"cpu": 4.0, "cpu_mem": 8000, "gpu_resource": {}},
+                    )
+            except Exception as e:
+                errors.append(e)
+
+        def remove_nodes():
+            try:
+                for i in range(10):
+                    manager.remove_node(f"node-add-Thread-1-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=add_nodes, name="Thread-1"),
+            threading.Thread(target=add_nodes, name="Thread-2"),
+            threading.Thread(target=remove_nodes, name="Thread-3"),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # No exceptions should have occurred
+        assert len(errors) == 0
+
+    def test_concurrent_select_and_release(self):
+        """Concurrent select and release should maintain resource consistency."""
+        import threading
+        import time
+
+        manager = ResourceManager()
+        manager.add_node(
+            node_id="node-1",
+            node_ip="192.168.1.1",
+            resources={"cpu": 2.0, "cpu_mem": 8000, "gpu_resource": {}},
+        )
+
+        errors = []
+        allocated = []
+        lock = threading.Lock()
+
+        def allocate_and_release():
+            try:
+                req = TaskResourceRequirements(cpu=1.0, memory_bytes=1000)
+                result = manager.select_node(req)
+                if result:
+                    with lock:
+                        allocated.append(result)
+                    time.sleep(0.001)  # Small delay to increase contention
+                    manager.release_task_resources(result.node_id, req)
+            except Exception as e:
+                errors.append(e)
+
+        # Run many cycles of allocate/release
+        threads = [threading.Thread(target=allocate_and_release) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+        # After all releases, resources should be back to original
+        node = manager.get_node("node-1")
+        assert node.available_resources.cpu_count == 2.0
+        assert node.available_resources.memory_bytes == 8000

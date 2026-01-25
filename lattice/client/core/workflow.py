@@ -2,6 +2,7 @@
 Lattice workflow client for building and executing workflows.
 """
 import json
+import logging
 import threading
 from typing import Dict, List, Any, Optional, Callable, Union, TYPE_CHECKING
 
@@ -12,6 +13,8 @@ from lattice.client.core.decorator import get_task_metadata
 
 if TYPE_CHECKING:
     from lattice.client.base import BaseClient
+
+logger = logging.getLogger(__name__)
 
 
 class LatticeWorkflow:
@@ -47,6 +50,7 @@ class LatticeWorkflow:
         self._nodes: Dict[str, Dict[str, Any]] = {}
         self._edges: List[tuple] = []
         self._results_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_lock = threading.Lock()
 
     def add_task(
         self,
@@ -176,35 +180,64 @@ class LatticeWorkflow:
 
         return result.get("run_id")
 
-    def get_results(self, run_id: str, verbose: bool = True) -> List[Dict[str, Any]]:
-        if run_id in self._results_cache:
-            cached = self._results_cache[run_id]
-            if verbose:
-                for msg in cached:
-                    print(msg)
-            return cached
-        
+    def get_results(
+        self,
+        run_id: str,
+        verbose: bool = True,
+        timeout: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get workflow execution results via WebSocket.
+
+        Args:
+            run_id: The workflow run ID.
+            verbose: If True, print messages as they arrive.
+            timeout: Maximum time to wait for results in seconds.
+                    If None, waits indefinitely.
+
+        Returns:
+            List of result messages from the workflow execution.
+
+        Raises:
+            WorkflowTimeoutError: If timeout is exceeded.
+            WebSocketError: If WebSocket connection fails.
+        """
+        # Check cache first (thread-safe)
+        with self._cache_lock:
+            if run_id in self._results_cache:
+                cached = self._results_cache[run_id]
+                if verbose:
+                    for msg in cached:
+                        print(msg)
+                return cached
+
         ws_url = self.server_url.replace("http://", "ws://").replace("https://", "wss://")
         url = f"{ws_url}/get_workflow_res/{self.workflow_id}/{run_id}"
-        
-        messages = []
-        
+
+        messages: List[Dict[str, Any]] = []
+        done_event = threading.Event()
+        error_holder: List[Exception] = []
+
         def on_message(ws, message):
-            msg_data = json.loads(message)
-            messages.append(msg_data)
-            if verbose:
-                print(msg_data)
-        
+            try:
+                msg_data = json.loads(message)
+                messages.append(msg_data)
+                if verbose:
+                    print(msg_data)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse WebSocket message: {e}")
+
         def on_error(ws, error):
+            error_holder.append(error)
             if verbose:
                 print(f"WebSocket error: {error}")
-        
+            done_event.set()
+
         def on_close(ws, close_code, close_msg):
-            pass
-        
+            done_event.set()
+
         def on_open(ws):
             pass
-        
+
         ws = websocket.WebSocketApp(
             url,
             on_open=on_open,
@@ -212,19 +245,32 @@ class LatticeWorkflow:
             on_error=on_error,
             on_close=on_close,
         )
-        
+
         ws_thread = threading.Thread(target=ws.run_forever)
         ws_thread.daemon = True
         ws_thread.start()
-        
-        import time
-        last_count = 0
-        while ws_thread.is_alive() or len(messages) > last_count:
-            while len(messages) > last_count:
-                last_count += 1
-            time.sleep(0.1)
-        
-        self._results_cache[run_id] = messages
+
+        # Wait for completion with optional timeout
+        completed = done_event.wait(timeout=timeout)
+
+        if not completed:
+            # Timeout occurred - close WebSocket and raise error
+            try:
+                ws.close()
+            except Exception:
+                pass
+            from lattice.exceptions import WorkflowTimeoutError
+            raise WorkflowTimeoutError(run_id, timeout)
+
+        # Check for WebSocket errors
+        if error_holder:
+            from lattice.exceptions import WebSocketError
+            raise WebSocketError(str(error_holder[0]), {"run_id": run_id})
+
+        # Cache results (thread-safe)
+        with self._cache_lock:
+            self._results_cache[run_id] = messages
+
         return messages
 
     def __repr__(self) -> str:

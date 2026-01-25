@@ -12,6 +12,7 @@ from lattice.core.runtime.task import (
     TaskRuntimeRegistry,
     create_task_runtime,
 )
+from lattice.core.runtime.task_reference import TaskReference
 from lattice.core.workflow.base import TaskType
 from lattice.core.runtime.workflow import (
     WorkflowRuntime,
@@ -300,3 +301,82 @@ class TestTaskRuntimeRegistry:
         }
         with pytest.raises(ValueError, match="Unknown task type"):
             TaskRuntimeRegistry.create(data)
+
+
+class TestTaskReference:
+    """Tests for TaskReference parsing."""
+
+    def test_to_string(self):
+        ref = TaskReference(task_id="task-1", output_key="result")
+        assert ref.to_string() == "task-1.output.result"
+
+    def test_from_string_valid(self):
+        ref = TaskReference.from_string("task-1.output.result")
+        assert ref is not None
+        assert ref.task_id == "task-1"
+        assert ref.output_key == "result"
+
+    def test_from_string_with_dots_in_task_id(self):
+        """Task IDs with dots should be parsed correctly."""
+        ref = TaskReference.from_string("my.task.id.output.result")
+        assert ref is not None
+        assert ref.task_id == "my.task.id"
+        assert ref.output_key == "result"
+
+    def test_from_string_invalid_no_separator(self):
+        ref = TaskReference.from_string("task-1-result")
+        assert ref is None
+
+    def test_from_string_invalid_empty_task_id(self):
+        ref = TaskReference.from_string(".output.result")
+        assert ref is None
+
+    def test_from_string_invalid_empty_output_key(self):
+        ref = TaskReference.from_string("task-1.output.")
+        assert ref is None
+
+    def test_roundtrip(self):
+        original = TaskReference(task_id="complex.task.id", output_key="data")
+        ref_string = original.to_string()
+        parsed = TaskReference.from_string(ref_string)
+        assert parsed is not None
+        assert parsed.task_id == original.task_id
+        assert parsed.output_key == original.output_key
+
+    def test_is_valid_reference(self):
+        assert TaskReference.is_valid_reference("task-1.output.result")
+        assert TaskReference.is_valid_reference("my.task.output.data")
+        assert not TaskReference.is_valid_reference("invalid")
+        assert not TaskReference.is_valid_reference("task.result")
+
+
+class TestWorkflowRuntimeGetTaskResult:
+    """Tests for WorkflowRuntime.get_task_result with TaskReference."""
+
+    def test_get_task_result_simple(self):
+        wf = WorkflowRuntime(workflow_id="wf-1")
+        task = CodeTaskRuntime(workflow_id="wf-1", task_id="task-1", resources={})
+        wf.add_task(task)
+        task.set_completed(result={"data": "value"})
+
+        result = wf.get_task_result("task-1.output.data")
+        assert result == "value"
+
+    def test_get_task_result_with_dots_in_task_id(self):
+        wf = WorkflowRuntime(workflow_id="wf-1")
+        task = CodeTaskRuntime(workflow_id="wf-1", task_id="my.task.id", resources={})
+        wf.add_task(task)
+        task.set_completed(result={"result": 42})
+
+        result = wf.get_task_result("my.task.id.output.result")
+        assert result == 42
+
+    def test_get_task_result_invalid_reference(self):
+        wf = WorkflowRuntime(workflow_id="wf-1")
+        result = wf.get_task_result("invalid-reference")
+        assert result is None
+
+    def test_get_task_result_task_not_found(self):
+        wf = WorkflowRuntime(workflow_id="wf-1")
+        result = wf.get_task_result("nonexistent.output.data")
+        assert result is None
