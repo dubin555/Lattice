@@ -22,6 +22,7 @@ from lattice.exceptions import (
     TaskCancelledError,
     NodeFailedError,
     CyclicDependencyError,
+    BackpressureError,
 )
 
 F = TypeVar("F", bound=Callable)
@@ -34,7 +35,7 @@ def handle_route_exceptions(func: F) -> F:
     Maps Lattice exceptions to appropriate HTTP status codes:
     - 404: WorkflowNotFoundError, TaskNotFoundError (resource not found)
     - 400: ValidationError, CyclicDependencyError (bad request / invalid input)
-    - 503: OrchestratorNotInitializedError (service unavailable)
+    - 503: OrchestratorNotInitializedError, BackpressureError (service unavailable)
     - 500: All other exceptions (internal server error)
 
     HTTPException instances are re-raised as-is to preserve custom status codes
@@ -62,6 +63,21 @@ def handle_route_exceptions(func: F) -> F:
         except OrchestratorNotInitializedError as e:
             # Service not ready / unavailable
             raise HTTPException(status_code=503, detail=str(e))
+        except BackpressureError as e:
+            # System is overloaded - client should retry later
+            # Include backpressure details in the response
+            detail = {
+                "message": str(e),
+                "queue_name": e.queue_name,
+                "current_size": e.current_size,
+                "capacity": e.capacity,
+                "retry_after": 1,  # Suggest retry after 1 second
+            }
+            raise HTTPException(
+                status_code=503,
+                detail=detail,
+                headers={"Retry-After": "1"},
+            )
         except (ValidationError, CyclicDependencyError) as e:
             # Client-side validation errors
             raise HTTPException(status_code=400, detail=str(e))

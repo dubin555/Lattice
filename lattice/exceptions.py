@@ -120,3 +120,34 @@ class WorkflowTimeoutError(ClientError):
         )
         self.run_id = run_id
         self.timeout = timeout
+
+
+class BackpressureError(ServerError):
+    """Exception raised when the system is under backpressure.
+
+    This indicates that the system cannot accept more work due to
+    queue capacity limits being reached. Clients should retry later
+    or reduce their request rate.
+    """
+
+    def __init__(
+        self,
+        message: str = "System is under backpressure",
+        queue_name: Optional[str] = None,
+        current_size: Optional[int] = None,
+        capacity: Optional[int] = None,
+    ):
+        details = {}
+        if queue_name:
+            details["queue_name"] = queue_name
+        if current_size is not None:
+            details["current_size"] = current_size
+        if capacity is not None:
+            details["capacity"] = capacity
+        if current_size is not None and capacity is not None:
+            details["utilization"] = current_size / capacity if capacity > 0 else 1.0
+
+        super().__init__(message, details)
+        self.queue_name = queue_name
+        self.current_size = current_size
+        self.capacity = capacity

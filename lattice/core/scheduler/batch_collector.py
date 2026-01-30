@@ -203,6 +203,11 @@ class BatchCollector:
                 return len(group.tasks) if group else 0
             return sum(len(g.tasks) for g in self._groups.values())
 
+    def group_count(self) -> int:
+        """Get count of active batch groups."""
+        with self._lock:
+            return len(self._groups)
+
     def clear(self) -> None:
         """Clear all batch groups."""
         with self._lock:

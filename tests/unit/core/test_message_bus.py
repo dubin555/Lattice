@@ -139,15 +139,122 @@ class TestMessageBus:
             Message(MessageType.RUN_TASK, {"id": "2"}),
             Message(MessageType.RUN_TASK, {"id": "3"}),
         ]
-        
+
         for msg in messages:
             bus.send_to_scheduler(msg)
-        
+
         received = []
         for _ in range(3):
             msg = bus.receive_in_scheduler(timeout=1.0)
             if msg:
                 received.append(msg)
-        
+
         assert len(received) == 3
         assert [m.data["id"] for m in received] == ["1", "2", "3"]
+
+
+class TestMessageBusBackpressure:
+    """Tests for MessageBus backpressure support."""
+
+    def test_custom_capacity(self):
+        """Test MessageBus with custom queue capacities."""
+        bus = MessageBus(to_scheduler_capacity=100, from_scheduler_capacity=50)
+        assert bus._to_scheduler_capacity == 100
+        assert bus._from_scheduler_capacity == 50
+
+    def test_queue_size_properties(self):
+        """Test queue size monitoring properties."""
+        bus = MessageBus(to_scheduler_capacity=100)
+
+        # Initially empty
+        assert bus.to_scheduler_size == 0
+        assert bus.from_scheduler_size == 0
+
+        # Add messages
+        msg = Message(MessageType.RUN_TASK, {"id": "1"})
+        bus.send_to_scheduler(msg)
+
+        assert bus.to_scheduler_size == 1
+
+    def test_is_full_methods(self):
+        """Test queue full check methods."""
+        bus = MessageBus(to_scheduler_capacity=2, from_scheduler_capacity=2)
+
+        assert bus.is_to_scheduler_full() is False
+        assert bus.is_from_scheduler_full() is False
+
+        # Fill to_scheduler queue
+        bus.send_to_scheduler(Message(MessageType.RUN_TASK, {"id": "1"}))
+        bus.send_to_scheduler(Message(MessageType.RUN_TASK, {"id": "2"}))
+
+        assert bus.is_to_scheduler_full() is True
+
+    def test_send_to_full_queue_returns_false(self):
+        """Test that sending to a full queue returns False."""
+        bus = MessageBus(to_scheduler_capacity=1)
+
+        # First message succeeds
+        result1 = bus.send_to_scheduler(
+            Message(MessageType.RUN_TASK, {"id": "1"}),
+            block=False
+        )
+        assert result1 is True
+
+        # Second message fails (queue full)
+        result2 = bus.send_to_scheduler(
+            Message(MessageType.RUN_TASK, {"id": "2"}),
+            block=False
+        )
+        assert result2 is False
+
+    def test_try_send_to_scheduler(self):
+        """Test non-blocking send method."""
+        bus = MessageBus(to_scheduler_capacity=1)
+
+        # First succeeds
+        assert bus.try_send_to_scheduler(Message(MessageType.RUN_TASK, {"id": "1"})) is True
+
+        # Second fails (non-blocking)
+        assert bus.try_send_to_scheduler(Message(MessageType.RUN_TASK, {"id": "2"})) is False
+
+    def test_get_backpressure_status(self):
+        """Test backpressure status monitoring."""
+        bus = MessageBus(to_scheduler_capacity=100, from_scheduler_capacity=50)
+
+        # Add some messages
+        for i in range(10):
+            bus.send_to_scheduler(Message(MessageType.RUN_TASK, {"id": str(i)}))
+
+        status = bus.get_backpressure_status()
+
+        assert status["to_scheduler_size"] == 10
+        assert status["to_scheduler_capacity"] == 100
+        assert status["to_scheduler_utilization"] == 0.1
+        assert status["from_scheduler_size"] == 0
+        assert status["from_scheduler_capacity"] == 50
+        assert status["is_to_scheduler_full"] is False
+        assert status["is_from_scheduler_full"] is False
+
+
+class TestMessageTypeBackpressure:
+    """Test TASK_REJECTED message type for backpressure."""
+
+    def test_task_rejected_type_exists(self):
+        """Verify TASK_REJECTED message type exists."""
+        assert MessageType.TASK_REJECTED.value == "task_rejected"
+
+    def test_task_rejected_message(self):
+        """Test creating a TASK_REJECTED message."""
+        msg = Message(
+            message_type=MessageType.TASK_REJECTED,
+            data={
+                "task_id": "task-1",
+                "workflow_id": "wf-1",
+                "reason": "backpressure",
+                "pending_count": 10000,
+                "max_pending": 10000,
+            }
+        )
+
+        assert msg.message_type == MessageType.TASK_REJECTED
+        assert msg.data["reason"] == "backpressure"
