@@ -62,6 +62,17 @@ class RunContext(BaseContext):
             "data": msg_data,
         })
 
+    async def on_task_rejected(self, msg_data: Dict[str, Any]) -> None:
+        """Handle task rejection due to backpressure.
+
+        When a task is rejected, we treat it as an exception that stops the workflow.
+        The reason and capacity info are included in the message data.
+        """
+        await self.result_queue.put({
+            "type": MessageType.TASK_REJECTED.value,
+            "data": msg_data,
+        })
+
     async def wait_complete(self) -> List[Dict[str, Any]]:
         """Wait for the workflow to complete."""
         total_tasks = self.workflow.task_count
@@ -75,6 +86,9 @@ class RunContext(BaseContext):
             if msg["type"] == MessageType.FINISH_TASK.value:
                 completed_count += 1
             elif msg["type"] == MessageType.TASK_EXCEPTION.value:
+                break
+            elif msg["type"] == MessageType.TASK_REJECTED.value:
+                # Backpressure: task was rejected, treat as workflow failure
                 break
 
         return results

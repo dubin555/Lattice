@@ -109,6 +109,9 @@ class Orchestrator:
                 await ctx.on_task_started(msg_data)
             elif msg_type == MessageType.TASK_EXCEPTION:
                 await ctx.on_task_exception(msg_data)
+            elif msg_type == MessageType.TASK_REJECTED:
+                # Handle backpressure: task was rejected by scheduler
+                await ctx.on_task_rejected(msg_data)
 
     def create_workflow(self, workflow_id: str) -> Workflow:
         """Create a new workflow."""

@@ -12,11 +12,20 @@ Architecture:
        | ExecutorBackend (Ray / Local / ...)
        v
   Workers (execute tasks)
+
+Backpressure:
+  The scheduler implements backpressure through bounded pending task limits.
+  When the pending task queue reaches capacity, new tasks are rejected with
+  a TASK_REJECTED message, signaling the orchestrator to apply backpressure
+  to the API layer.
 """
 import logging
 import threading
 import time
 from typing import Dict, Any, List, Optional
+
+# Default limit for pending tasks
+DEFAULT_MAX_PENDING_TASKS = 10000
 
 from lattice.core.scheduler.message_bus import Message, MessageType, MessageBus
 from lattice.core.scheduler.batch_collector import BatchCollector
@@ -100,6 +109,11 @@ class Scheduler:
 
     Handles task scheduling, resource allocation, and executor management.
     Communicates with the Orchestrator via MessageBus.
+
+    Backpressure Support:
+        The scheduler enforces a maximum limit on pending tasks to prevent
+        unbounded memory growth. When the limit is reached, new tasks are
+        rejected and a TASK_REJECTED message is sent back to the orchestrator.
     """
 
     def __init__(
@@ -108,10 +122,12 @@ class Scheduler:
         executor_type: ExecutorType = ExecutorType.RAY,
         ray_head_port: int = 6379,
         batch_rules: Optional[List[BatchRule]] = None,
+        max_pending_tasks: int = DEFAULT_MAX_PENDING_TASKS,
     ):
         self._message_bus = message_bus
         self._executor_type = executor_type
         self._ray_head_port = ray_head_port
+        self._max_pending_tasks = max_pending_tasks
 
         self._executor: Optional[ExecutorBackend] = None
         self._workflow_manager = WorkflowRuntimeManager()
@@ -171,8 +187,12 @@ class Scheduler:
 
     def _handle_message(self, message: Message) -> None:
         """Handle incoming messages from the Orchestrator."""
+        # Handle RUN_TASK specially for backpressure
+        if message.message_type == MessageType.RUN_TASK:
+            self._handle_run_task(message.data)
+            return
+
         handlers = {
-            MessageType.RUN_TASK: lambda d: self._pending_tasks.append(create_task_runtime(d)),
             MessageType.CLEAR_WORKFLOW: lambda d: self._workflow_manager.clear_workflow(d["workflow_id"]),
             MessageType.STOP_WORKFLOW: lambda d: self._cancel_workflow(d["workflow_id"]),
             MessageType.START_WORKER: lambda d: self._resource_manager.add_node(
@@ -184,6 +204,32 @@ class Scheduler:
         handler = handlers.get(message.message_type)
         if handler:
             handler(message.data)
+
+    def _handle_run_task(self, data: Dict[str, Any]) -> None:
+        """Handle a RUN_TASK message with backpressure check.
+
+        If the pending task queue is at capacity, the task is rejected
+        and a TASK_REJECTED message is sent back to the orchestrator.
+        """
+        total_pending = len(self._pending_tasks) + self._batch_collector.pending_count()
+
+        if total_pending >= self._max_pending_tasks:
+            # Reject the task due to backpressure
+            logger.warning(
+                f"Task rejected due to backpressure: pending={total_pending}, "
+                f"max={self._max_pending_tasks}, task_id={data.get('task_id')}"
+            )
+            self._send(MessageType.TASK_REJECTED, {
+                "workflow_id": data.get("workflow_id"),
+                "task_id": data.get("task_id"),
+                "reason": "backpressure",
+                "pending_count": total_pending,
+                "max_pending": self._max_pending_tasks,
+            })
+            return
+
+        # Accept the task
+        self._pending_tasks.append(create_task_runtime(data))
 
     def _dispatch_pending_tasks(self) -> None:
         """Dispatch pending tasks to available nodes.
@@ -294,6 +340,12 @@ class Scheduler:
 
         except Exception as e:
             logger.error(f"Failed to submit batch {group_key}: {e}")
+            # Release allocated resources before putting tasks back
+            if node and self._executor_type == ExecutorType.RAY:
+                requirements = TaskResourceRequirements.from_dict(template_task.resources)
+                self._resource_manager.release_task_resources(
+                    node.node_id, requirements, node.gpu_id
+                )
             # Put tasks back to pending
             for task in tasks:
                 self._pending_tasks.append(task)
@@ -338,6 +390,18 @@ class Scheduler:
             })
         except Exception as e:
             logger.error(f"Failed to submit task {task.task_id}: {e}")
+            # Release allocated resources on failure
+            if node and self._executor_type == ExecutorType.RAY:
+                requirements = TaskResourceRequirements.from_dict(task.resources)
+                self._resource_manager.release_task_resources(
+                    node.node_id, requirements, node.gpu_id
+                )
+            # Notify orchestrator of task failure
+            self._send(MessageType.TASK_EXCEPTION, {
+                "workflow_id": task.workflow_id,
+                "task_id": task.task_id,
+                "result": f"Failed to submit task: {e}",
+            })
 
     def _resolve_inputs(self, task: CodeTaskRuntime) -> Dict[str, Any]:
         """Resolve task input parameters from dependencies."""
@@ -527,3 +591,33 @@ class Scheduler:
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
         return self._running and self._thread is not None and self._thread.is_alive()
+
+    @property
+    def pending_task_count(self) -> int:
+        """Current number of pending tasks (including batched)."""
+        return len(self._pending_tasks) + self._batch_collector.pending_count()
+
+    @property
+    def max_pending_tasks(self) -> int:
+        """Maximum allowed pending tasks."""
+        return self._max_pending_tasks
+
+    def is_at_capacity(self) -> bool:
+        """Check if the scheduler is at pending task capacity."""
+        return self.pending_task_count >= self._max_pending_tasks
+
+    def get_backpressure_status(self) -> Dict[str, Any]:
+        """Get current backpressure status for monitoring.
+
+        Returns:
+            Dictionary with pending task counts and capacity info.
+        """
+        pending = self.pending_task_count
+        return {
+            "pending_task_count": pending,
+            "max_pending_tasks": self._max_pending_tasks,
+            "pending_utilization": pending / self._max_pending_tasks if self._max_pending_tasks > 0 else 0,
+            "is_at_capacity": self.is_at_capacity(),
+            "running_task_count": len(self._task_handles),
+            "batch_group_count": self._batch_collector.group_count(),
+        }

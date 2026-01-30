@@ -22,3 +22,8 @@ class BaseContext(ABC):
     async def on_task_exception(self, msg_data: Dict[str, Any]) -> None:
         """Handle task exception."""
         pass
+
+    @abstractmethod
+    async def on_task_rejected(self, msg_data: Dict[str, Any]) -> None:
+        """Handle task rejection due to backpressure."""
+        pass
