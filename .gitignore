@@ -134,5 +134,4 @@ twine.log
 # Ray
 /tmp/ray/
 
-# Claude Code
-CLAUDE.md
+# Claude Code local settings (not .claude/docs which is committed)
