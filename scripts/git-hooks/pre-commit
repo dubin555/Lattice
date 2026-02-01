@@ -1,0 +1,35 @@
+#!/bin/bash
+# Git pre-commit hook for Lattice project
+# Runs code quality checks and tests before allowing commit
+
+set -e
+
+echo "=========================================="
+echo "Running pre-commit checks..."
+echo "=========================================="
+
+# 1. Code Quality Check (ruff) - warning only, don't block commit
+echo ""
+echo "[1/2] Running code quality check (ruff)..."
+if command -v ruff &> /dev/null; then
+    # Only check, don't auto-fix during commit
+    ruff check lattice/ --output-format=concise 2>/dev/null || true
+    echo "ℹ️  Code quality check complete (warnings shown above if any)"
+else
+    echo "⚠️  ruff not installed, skipping code quality check"
+fi
+
+# 2. Run Unit Tests - this must pass
+echo ""
+echo "[2/2] Running unit tests..."
+python -m pytest tests/unit/ -q --tb=no
+if [ $? -ne 0 ]; then
+    echo "❌ Unit tests failed. Please fix failing tests."
+    exit 1
+fi
+echo "✅ Unit tests passed"
+
+echo ""
+echo "=========================================="
+echo "✅ All pre-commit checks passed!"
+echo "=========================================="

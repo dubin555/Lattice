@@ -1,0 +1,43 @@
+#!/bin/bash
+# Git commit-msg hook for Lattice project
+# Validates commit message format follows Conventional Commits
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Conventional Commits pattern:
+# type(scope)?: description
+#
+# Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,}"
+
+# Also allow merge commits and fixup commits
+MERGE_PATTERN="^Merge "
+FIXUP_PATTERN="^(fixup|squash)! "
+
+if [[ $COMMIT_MSG =~ $MERGE_PATTERN ]] || [[ $COMMIT_MSG =~ $FIXUP_PATTERN ]]; then
+    exit 0
+fi
+
+if ! echo "$COMMIT_MSG" | head -1 | grep -qE "$PATTERN"; then
+    echo ""
+    echo "❌ Invalid commit message format!"
+    echo ""
+    echo "Commit message must follow Conventional Commits format:"
+    echo "  <type>(<scope>): <description>"
+    echo ""
+    echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+    echo ""
+    echo "Examples:"
+    echo "  feat: add user authentication"
+    echo "  fix(api): resolve timeout issue"
+    echo "  refactor: simplify error handling"
+    echo "  docs: update README with examples"
+    echo ""
+    echo "Your message was:"
+    echo "  $(head -1 "$COMMIT_MSG_FILE")"
+    echo ""
+    exit 1
+fi
+
+echo "✅ Commit message format valid"
